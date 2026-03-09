@@ -7,9 +7,14 @@ find_package(glm REQUIRED CONFIG)
 find_package(assimp REQUIRED CONFIG)
 
 # Add source to this project's executable.
-add_executable (ChessCPP "main.cpp")
+add_executable (ChessCPP "main.cpp" "stb_image.cpp")
 
 set_property(TARGET ChessCPP PROPERTY CXX_STANDARD 20)
+
+target_include_directories(ChessCPP PRIVATE
+    "${CMAKE_SOURCE_DIR}/include"
+    "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include"
+)
 
 target_link_libraries(ChessCPP PRIVATE
     SDL3::SDL3

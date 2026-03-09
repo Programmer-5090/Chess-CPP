@@ -8,6 +8,7 @@
         "sdl3-shadercross",
         "glad",
         "glm",
+        "stb",
         "assimp"
     ]
 }

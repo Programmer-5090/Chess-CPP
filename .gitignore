@@ -385,3 +385,6 @@ vcpkg-manifest-install.log
 
 # Compiled shaders / generated assets
 *.spv
+
+# CMake user-local presets (machine-specific paths, never commit)
+CMakeUserPresets.json
