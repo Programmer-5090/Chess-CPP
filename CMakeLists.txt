@@ -12,4 +12,4 @@ endif()
 project ("Chess CPP")
 
 # Include sub-projects.
-add_subdirectory ("Chess CPP")
+add_subdirectory ("src")

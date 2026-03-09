@@ -1,0 +1,13 @@
+{
+    "name": "chess-cpp",
+    "version": "0.1.0",
+    "dependencies": [
+        "sdl3",
+        "sdl3-image",
+        "sdl3-ttf",
+        "sdl3-shadercross",
+        "glad",
+        "glm",
+        "assimp"
+    ]
+}

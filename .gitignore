@@ -361,3 +361,27 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+cmake_uninstall.cmake
+CTestTestfile.cmake
+CPackConfig.cmake
+CPackSourceConfig.cmake
+install_manifest.txt
+compile_commands.json
+_deps/
+
+# CMake build & install output (from CMakePresets.json)
+build/
+install/
+
+# vcpkg manifest-mode installed packages and logs
+vcpkg_installed/
+vcpkg-manifest-install.log
+
+# Compiled shaders / generated assets
+*.spv
