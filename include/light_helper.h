@@ -61,7 +61,7 @@ public:
         m_shader->setMat4("uView",       camera.GetViewMatrix());
         m_shader->setMat4("uProjection", projection);
 
-        // ?? Point lights: small sphere ??????????????????????????????????
+        // Point lights: small sphere
         for (const auto& light : lights.points)
         {
             if (!light.visible) continue;
@@ -72,7 +72,7 @@ public:
             m_sphereMesh->Draw(*m_shader);
         }
 
-        // ?? Directional lights: thin cuboid rotated along direction ?????
+        // Directional lights: thin cuboid rotated along direction
         for (const auto& light : lights.directionals)
         {
             if (!light.visible) continue;

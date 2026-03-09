@@ -1,0 +1,1762 @@
+# Chess CPP — Full API & Function Reference
+
+This document provides thorough documentation for every class and function in the
+Chess CPP project, organised by module.
+
+---
+
+## Table of Contents
+
+1. [main.cpp — Application Entry Point](#1-maincpp--application-entry-point)
+2. [Camera](#2-camera)
+3. [Input](#3-input)
+4. [Timer](#4-timer)
+5. [Renderer](#5-renderer)
+6. [Scene / SceneObject / Material](#6-scene--sceneobject--material)
+7. [Transform](#7-transform)
+8. [Mesh](#8-mesh)
+9. [Model](#9-model)
+10. [Shader](#10-shader)
+11. [ComputeShader](#11-computeshader)
+12. [Framebuffer](#12-framebuffer)
+13. [TextureCache](#13-texturecache)
+14. [Light / LightList](#14-light--lightlist)
+15. [LightHelper](#15-lighthelper)
+16. [CameraHelper](#16-camerahelper)
+17. [Geometry — GeometryData](#17-geometry--geometrydata)
+18. [Geometry — Cuboid](#18-geometry--cuboid)
+19. [Geometry — Polygon](#19-geometry--polygon)
+20. [Geometry — ParametricSurface](#20-geometry--parametricsurface)
+21. [Geometry — Sphere](#21-geometry--sphere)
+22. [Geometry — Circle](#22-geometry--circle)
+23. [Logger](#23-logger)
+24. [PerformanceProfiler / ScopedTimer](#24-performanceprofiler--scopedtimer)
+25. [ThreadPool / TaskQueue / Thread](#25-threadpool--taskqueue--thread)
+26. [BoundingBox](#26-boundingbox)
+27. [Shaders](#27-shaders)
+
+---
+
+## 1. `main.cpp` — Application Entry Point
+
+**File:** `src/main.cpp`
+
+### `processInputs()`
+
+```cpp
+static void processInputs(Input& input, bool& running, SDL_Window* window,
+                          Camera& camera, Renderer& renderer,
+                          Framebuffer& framebuffer, bool& mouseCaptured);
+```
+
+Polls and dispatches all SDL events for the current frame.
+
+| Parameter | Description |
+|-----------|-------------|
+| `input` | `Input` instance whose `update()` is called first to drain the SDL event queue. |
+| `running` | Set to `false` when Escape is pressed or the window close event is received. |
+| `window` | SDL window handle; used to toggle relative (captured) mouse mode. |
+| `camera` | Not used directly — passed for possible future use in resize callbacks. |
+| `renderer` | `Renderer::onResize()` is called on `SDL_EVENT_WINDOW_RESIZED`. |
+| `framebuffer` | `Framebuffer::resize()` is called on `SDL_EVENT_WINDOW_RESIZED`. |
+| `mouseCaptured` | Boolean toggled by the Tab key; controls whether relative mouse mode is active. |
+
+**Behavior:**
+- Calls `Input::update()` to drain the SDL event queue.
+- Sets `running = false` on quit or Escape.
+- Toggles `mouseCaptured` and `SDL_SetWindowRelativeMouseMode` on Tab.
+- On `SDL_EVENT_WINDOW_RESIZED`, calls `renderer.onResize()` and `framebuffer.resize()` with the new dimensions.
+
+---
+
+### `main()`
+
+Initialises all subsystems, runs the game loop, and cleans up on exit.
+
+**Startup sequence:**
+1. `Logger::init("logs", LogLevel::INFO, false)` — opens timestamped log file.
+2. `ThreadPool pool` — spins up `hardware_concurrency` worker threads.
+3. `SDL_Init(SDL_INIT_VIDEO)` — initialise SDL.
+4. Set OpenGL 4.3 Core profile attributes via `SDL_GL_SetAttribute`.
+5. `SDL_CreateWindow` — create resizable OpenGL window (800 × 600).
+6. `SDL_GL_CreateContext` — create GL context.
+7. `gladLoadGLLoader` — load OpenGL function pointers.
+8. `SDL_GL_SetSwapInterval(1)` — enable VSync.
+9. Construct `Camera`, `Renderer`, `Framebuffer`.
+10. Set up light position/color and clear color on `Renderer`.
+11. Build initial `Scene` with a blue `Cuboid` using `cube.vert/frag`.
+
+**Game loop per frame:**
+1. `Timer::tick()` ? `deltaTime`.
+2. `processInputs()`.
+3. `Camera::ProcessInput()` when mouse is captured.
+4. Rotate the cube: `SceneObject::transform.setEuler()`.
+5. Off-screen render: bind FBO ? `beginFrame` ? `drawScene` ? `drawGrid` ? `drawSelected` ? `endFrame` ? unbind.
+6. MSAA resolve: `Framebuffer::resolve()` ? `glBlitFramebuffer` to default back-buffer.
+7. `SDL_GL_SwapWindow`.
+
+**Cleanup:**
+- `TextureCache::get().clear()` — release all GPU textures.
+- `Logger::shutdown()`.
+- `SDL_GL_DestroyContext` / `SDL_DestroyWindow` / `SDL_Quit`.
+
+---
+
+## 2. Camera
+
+**Files:** `include/camera.h`, `src/camera.cpp`
+
+### Enumerations
+
+#### `Camera_Movement`
+Direction values passed to `ProcessKeyboard`.
+
+| Value | Meaning |
+|-------|---------|
+| `FORWARD` | Move along the camera's front vector. |
+| `BACKWARD` | Move opposite the front vector. |
+| `LEFT` | Move along the negative right vector. |
+| `RIGHT` | Move along the positive right vector. |
+| `UP` | Move along the camera's up vector. |
+| `DOWN` | Move opposite the up vector. |
+
+#### `CameraProjection`
+Projection mode.
+
+| Value | Meaning |
+|-------|---------|
+| `Perspective` | Standard perspective frustum (`glm::perspective`). |
+| `Orthographic` | Axis-aligned orthographic projection (`glm::ortho`). |
+
+### Default Constants
+
+| Constant | Value | Meaning |
+|----------|-------|---------|
+| `YAW` | `-90.0f` | Default yaw (faces ?Z). |
+| `PITCH` | `0.0f` | Default pitch (level). |
+| `SPEED` | `10.5f` | Default movement speed (units/s). |
+| `SENSITIVITY` | `0.1f` | Default mouse sensitivity. |
+| `ZOOM` | `45.0f` | Default vertical FOV in degrees. |
+| `ORTHO_HEIGHT` | `50.0f` | Default orthographic half-height. |
+| `NEAR_PLANE` | `0.1f` | Near clip plane distance. |
+| `FAR_PLANE` | `1000.0f` | Far clip plane distance. |
+
+### Public Members
+
+| Member | Type | Description |
+|--------|------|-------------|
+| `Position` | `glm::vec3` | World-space camera position. |
+| `Front` | `glm::vec3` | Normalised look direction. |
+| `Up` | `glm::vec3` | Camera up vector (recomputed each frame). |
+| `Right` | `glm::vec3` | Camera right vector (recomputed each frame). |
+| `WorldUp` | `glm::vec3` | Fixed world up reference (default: Y axis). |
+| `Yaw` | `float` | Horizontal rotation angle in degrees. |
+| `Pitch` | `float` | Vertical rotation angle in degrees (clamped ±89°). |
+| `MovementSpeed` | `float` | Units per second. |
+| `MouseSensitivity` | `float` | Degrees of rotation per pixel of mouse movement. |
+| `Zoom` | `float` | Vertical FOV in degrees (perspective mode). |
+| `ProjectionMode` | `CameraProjection` | Active projection type. |
+| `OrthoHeight` | `float` | World-space height visible in orthographic mode. |
+| `NearPlane` | `float` | Near clip distance. |
+| `FarPlane` | `float` | Far clip distance. |
+
+### Constructors
+
+```cpp
+Camera(glm::vec3 position = {0,0,0},
+       glm::vec3 up       = {0,1,0},
+       float     yaw      = YAW,
+       float     pitch    = PITCH);
+```
+Construct from a position vector, world-up vector, and initial Euler angles.
+Internally calls `updateCameraVectors()`.
+
+```cpp
+Camera(float posX, float posY, float posZ,
+       float upX,  float upY,  float upZ,
+       float yaw,  float pitch);
+```
+Scalar overload — identical behaviour, just accepts individual floats.
+
+### Methods
+
+#### `GetViewMatrix()`
+```cpp
+glm::mat4 GetViewMatrix() const;
+```
+Returns `glm::lookAt(Position, Position + Front, Up)`.
+
+#### `GetProjectionMatrix()`
+```cpp
+glm::mat4 GetProjectionMatrix(float aspect) const;
+```
+Returns either:
+- `glm::perspective(radians(Zoom), aspect, NearPlane, FarPlane)` — Perspective mode.
+- `glm::ortho(-halfW, halfW, -halfH, halfH, NearPlane, FarPlane)` — Orthographic mode, where `halfH = OrthoHeight * 0.5`.
+
+| Parameter | Description |
+|-----------|-------------|
+| `aspect` | Viewport width / height ratio. |
+
+#### `ProcessKeyboard()`
+```cpp
+void ProcessKeyboard(Camera_Movement direction, float deltaTime);
+```
+Translates the camera position by `MovementSpeed * deltaTime` in the given direction.
+
+#### `ProcessMouseMovement()`
+```cpp
+void ProcessMouseMovement(float xoffset, float yoffset, bool constrainPitch = true);
+```
+Applies mouse deltas scaled by `MouseSensitivity` to `Yaw` and `Pitch`, then calls `updateCameraVectors()`.  
+When `constrainPitch` is `true`, pitch is clamped to `[-89°, +89°]`.
+
+#### `ProcessMouseScroll()`
+```cpp
+void ProcessMouseScroll(float yoffset);
+```
+In Perspective mode: adjusts `Zoom` (clamped `[1, 90]`).  
+In Orthographic mode: adjusts `OrthoHeight` (clamped `[1, 500]`).
+
+#### `ProcessInput()`
+```cpp
+void ProcessInput(const Input& input, float deltaTime);
+```
+High-level input handler that reads an `Input` object and dispatches to `ProcessKeyboard` and `ProcessMouseMovement`.
+
+| Key | Action |
+|-----|--------|
+| W | `FORWARD` |
+| S | `BACKWARD` |
+| A | `LEFT` |
+| D | `RIGHT` |
+| E | `UP` |
+| Q | `DOWN` |
+
+Mouse delta is read from `Input::getMouseDeltaX/Y()`. Y-axis is negated to match screen-to-world convention.
+
+#### `setPosition()`
+```cpp
+void setPosition(glm::vec3 pos);
+```
+Sets `Position` directly without recalculating vectors.
+
+#### Configuration Setters / Getters
+
+| Method | Description |
+|--------|-------------|
+| `SetProjectionMode(mode)` | Switch between `Perspective` and `Orthographic`. |
+| `SetClipPlanes(near, far)` | Override near/far clip planes. |
+| `SetOrthoHeight(height)` | Set orthographic world-space height. |
+| `GetProjectionMode()` | Returns current `CameraProjection`. |
+| `GetNearPlane()` | Returns near clip distance. |
+| `GetFarPlane()` | Returns far clip distance. |
+| `GetOrthoHeight()` | Returns orthographic height. |
+
+### Private Methods
+
+#### `updateCameraVectors()`
+Recomputes `Front`, `Right`, and `Up` from the current `Yaw` and `Pitch` using spherical coordinates:
+```
+Front.x = cos(Yaw) * cos(Pitch)
+Front.y = sin(Pitch)
+Front.z = sin(Yaw) * cos(Pitch)
+Right   = normalize(cross(Front, WorldUp))
+Up      = normalize(cross(Right, Front))
+```
+
+---
+
+## 3. Input
+
+**File:** `include/input.h`  (header-only)
+
+Wraps the SDL3 event queue into convenient per-frame key and mouse state.
+
+### Methods
+
+#### `update()`
+```cpp
+void update();
+```
+Must be called once per frame. Clears all transient state (key-down, key-up, mouse-down, mouse-up, delta), then drains `SDL_PollEvent` and updates all internal sets and arrays.
+
+#### `resetStates()`
+```cpp
+void resetStates();
+```
+Called internally by `update()`. Clears `keysDown`, `keysUp`, `events`, mouse down/up arrays, and `mouseDelta`.
+
+#### Keyboard Queries
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `keyDown` | `bool keyDown(const string& k)` | True only on the frame the key was first pressed. |
+| `keyUp` | `bool keyUp(const string& k)` | True only on the frame the key was released. |
+| `keyHeld` | `bool keyHeld(const string& k)` | True every frame the key is held down. |
+| `getKeysDown` | `const unordered_set<string>&` | Full set of keys that fired a down event this frame. |
+
+Key names match `SDL_GetKeyName()` output (e.g. `"W"`, `"Escape"`, `"Tab"`).
+
+#### `shouldQuit()`
+```cpp
+bool shouldQuit() const;
+```
+Returns `true` if `SDL_EVENT_QUIT` was received this frame.
+
+#### Mouse Position
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getMousePos()` | `pair<int,int>` | Absolute screen position `(x, y)`. |
+| `getMouseDelta()` | `pair<int,int>` | Relative motion this frame `(xrel, yrel)`. |
+| `getMouseX()` | `int` | Absolute X. |
+| `getMouseY()` | `int` | Absolute Y. |
+| `getMouseDeltaX()` | `int` | Relative X delta. |
+| `getMouseDeltaY()` | `int` | Relative Y delta. |
+
+#### Mouse Buttons
+
+Uses SDL button constants (`SDL_BUTTON_LEFT = 1`, etc.). Maximum of 16 buttons tracked.
+
+| Method | Description |
+|--------|-------------|
+| `isMouseButtonDown(b)` | True only on the frame button `b` was pressed. |
+| `isMouseButtonReleased(b)` | True only on the frame button `b` was released. |
+| `isMouseButtonHeld(b)` | True every frame button `b` is held. |
+| `isMousePressed()` | Alias for `isMouseButtonHeld(SDL_BUTTON_LEFT)`. |
+
+#### Event Access
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getCurrentEvent()` | `const SDL_Event&` | Last event processed. |
+| `getEvents()` | `const vector<SDL_Event>&` | All events polled this frame. |
+| `setCurrentEvent(e)` | `void` | Override the stored current event. |
+
+---
+
+## 4. Timer
+
+**File:** `include/timer.h`  (header-only)
+
+Simple frame timer using `SDL_GetTicks`.
+
+### Constructor
+```cpp
+Timer();
+```
+Initialises `m_last` to current tick count; `m_delta` to 0.
+
+### Methods
+
+#### `tick()`
+```cpp
+void tick();
+```
+Must be called once at the start of each frame. Computes `m_delta = (now - m_last) / 1000.0f` (seconds) and advances `m_last`.
+
+#### `deltaTime()`
+```cpp
+float deltaTime() const;
+```
+Returns the elapsed time in seconds since the last `tick()` call.
+
+---
+
+## 5. Renderer
+
+**Files:** `include/renderer.h`, `src/renderer.cpp`
+
+Central rendering class. Owns the projection/view matrices, light list, outline shader, grid shader, and debugging helpers.
+
+### Constructor
+
+```cpp
+Renderer(int width, int height, float fovDegrees = 45.0f);
+```
+Initialises OpenGL state, projection matrix, light list, helper objects, and loads shaders.
+
+| Parameter | Description |
+|-----------|-------------|
+| `width`, `height` | Initial viewport dimensions. |
+| `fovDegrees` | Vertical field of view in degrees for perspective projection. |
+
+**Side effects:**
+- `glEnable(GL_DEPTH_TEST)`, `glEnable(GL_STENCIL_TEST)`.
+- Creates default point light at `{2, 3, 2}` with white color.
+- Calls `m_lightHelper.init()` and `m_cameraHelper.init()`.
+- Loads `shaders/outline.vert/frag` and `shaders/infinite_grid.vert/frag`.
+- Generates `m_gridVAO` (empty VAO used by the grid vertex shader via `gl_VertexID`).
+
+### Destructor
+```cpp
+~Renderer();
+```
+Calls `glDeleteVertexArrays(1, &m_gridVAO)`.
+
+### Frame Control
+
+#### `beginFrame()`
+```cpp
+void beginFrame();
+```
+Calls `glClearColor` with the stored clear color and `glClear(COLOR | DEPTH | STENCIL)`.
+
+#### `endFrame()`
+```cpp
+void endFrame();
+```
+Currently a no-op placeholder reserved for future per-frame cleanup (e.g. unbinding state).
+
+#### `onResize()`
+```cpp
+void onResize(int width, int height);
+```
+Updates stored dimensions, calls `glViewport`, and recomputes the projection matrix via `updateProjection()`.
+
+### Configuration
+
+#### `setClearColor()`
+```cpp
+void setClearColor(float r, float g, float b, float a = 1.0f);
+```
+Sets the `glClearColor` used by `beginFrame()`.
+
+#### `setWireframe()`
+```cpp
+void setWireframe(bool enabled);
+```
+Calls `glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)` when `true`, `GL_FILL` when `false`.
+
+### Matrix Accessors
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getProjection()` | `const glm::mat4&` | Current projection matrix. |
+| `getView()` | `const glm::mat4&` | Last computed view matrix. |
+
+### Light Management
+
+| Method | Description |
+|--------|-------------|
+| `lights()` | Returns mutable/const reference to the `LightList`. |
+| `setLightPos(pos)` | Sets position of `points[0]` (backward-compat helper). |
+| `setLightColor(color)` | Sets color of `points[0]` (backward-compat helper). |
+
+### Draw Calls
+
+#### `applyUniforms()`
+```cpp
+void applyUniforms(Shader& shader, const Camera& camera, const glm::mat4& model) const;
+```
+Convenience method for manually-drawn objects. Updates view/projection from `camera` and calls `pushUniforms()` with a default `Material`.
+
+| Parameter | Description |
+|-----------|-------------|
+| `shader` | Shader to activate and populate. |
+| `camera` | Source of view and projection matrices. |
+| `model` | Model matrix for the object. |
+
+#### `drawScene()` — per-object shaders
+
+```cpp
+void drawScene(Scene& scene, const Camera& camera) const;
+```
+Iterates all `visible` `SceneObject`s that have both a `shader` and geometry (`mesh` or `model`).
+For each object:
+1. Sets `glStencilFunc(ALWAYS, 1, 0xFF)` and `glStencilMask(0xFF)`.
+2. Calls `pushUniforms` with the object's own shader and material.
+3. Calls `drawObject` (draws all meshes).
+
+#### `drawScene()` — override shader
+
+```cpp
+void drawScene(Scene& scene, const Camera& camera, Shader& overrideShader) const;
+```
+Same iteration, but uses a single provided shader for all objects. Sets only `uProjection`, `uView`, and `uModel` — no material uniforms. Intended for shadow / depth / picking passes.
+
+| Parameter | Description |
+|-----------|-------------|
+| `overrideShader` | Shader to use for every object; caller is responsible for setting any extra uniforms before this call. |
+
+#### `drawSelected()`
+```cpp
+void drawSelected(Scene& scene, const Camera& camera,
+                  glm::vec3 outlineColor = {1, 0.75, 0},
+                  float     outlineScale = 1.04f) const;
+```
+Draws a stencil-based outline around all `selected` objects using a two-pass technique:
+
+- **Pass 1:** Render selected objects normally into the stencil buffer (`stencil = 1`).
+- **Pass 2:** Render a uniformly-scaled version using `m_outlineShader` only where `stencil ? 1`.
+  Depth testing is disabled for Pass 2 so the outline is always visible.
+
+| Parameter | Description |
+|-----------|-------------|
+| `outlineColor` | RGB color of the outline (default: golden yellow). |
+| `outlineScale` | Scale multiplier applied to each object to produce the border (default: 4% larger). |
+
+#### `drawGrid()`
+```cpp
+void drawGrid(const Camera& camera,
+              float gridSize              = 100.0f,
+              float cellSize              = 0.025f,
+              float minPixelsBetweenCells = 2.0f,
+              float alpha                 = 0.5f) const;
+```
+Draws an infinite LOD-adaptive grid on the XZ plane using a quad with no VBO (vertex positions computed in the vertex shader via `gl_VertexID`).
+
+| Parameter | Description |
+|-----------|-------------|
+| `gridSize` | World-space radius of the visible grid. |
+| `cellSize` | Size of the smallest grid cell at LOD 0. |
+| `minPixelsBetweenCells` | Minimum screen-space pixels between lines before switching LOD. |
+| `alpha` | Overall opacity of the grid. |
+
+**GL state:** Reads depth (grid is occluded by scene geometry) but does not write depth. Enables additive alpha blending. Restores state after draw.
+
+#### `drawLightHelpers()`
+```cpp
+void drawLightHelpers(const Camera& camera) const;
+```
+Delegates to `LightHelper::draw()`, rendering a wireframe sphere at each `PointLight` and a wireframe cuboid for each `DirectionalLight`.
+
+#### `drawCameraHelper()`
+```cpp
+void drawCameraHelper(const Camera& target, const Camera& observer) const;
+```
+Delegates to `CameraHelper::draw()`, visualising the frustum of `target` as seen from `observer`.
+
+### Private Methods
+
+#### `pushUniforms()`
+```cpp
+void pushUniforms(Shader& shader,
+                  const glm::mat4& model,
+                  const glm::vec3& viewPos,
+                  const Material&  mat) const;
+```
+Uploads the full set of per-object uniforms to a shader:
+- Matrices: `uProjection`, `uView`, `uModel`, `uNormalMatrix` (transpose-inverse of model).
+- Light: reads `m_lights.points[0]` (or `directionals[0]` as fallback); sets `uLightPos`, `uLightColor`, `uLightConstant/Linear/Quadratic`.
+- Ambient: `uAmbientColor`, `uAmbientStrength` from `m_lights`.
+- Material: `uObjectColor`, `uSpecularColor`, `uShininess`, `uUseTexture`, `uUseSpecularMap`.
+- Textures: binds diffuse to `GL_TEXTURE0` and specular to `GL_TEXTURE1` when present.
+
+#### `updateProjection()`
+```cpp
+void updateProjection(const Camera* cam = nullptr);
+```
+Recomputes `m_projection`. If `cam` is non-null, uses `cam->GetProjectionMatrix(aspect)`; otherwise uses `glm::perspective(radians(m_fov), aspect, 0.1, 1000)`.
+
+---
+
+## 6. Scene / SceneObject / Material
+
+**Files:** `include/scene.h`, `src/scene.cpp`
+
+### `Material` struct
+
+Describes per-object shading properties.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `objectColor` | `glm::vec3` | `{1,1,1}` | Diffuse colour when no texture is bound. |
+| `specularColor` | `glm::vec3` | `{0.5,0.5,0.5}` | Specular tint when no specular map is bound. |
+| `shininess` | `float` | `32.0f` | Blinn-Phong specular exponent. |
+| `useTexture` | `bool` | `false` | If true, `texture_diffuse1` is sampled for base color. |
+| `useSpecularMap` | `bool` | `false` | If true, `texture_specular1` is sampled for specular. |
+| `diffuseTexture` | `unsigned int` | `0` | OpenGL texture ID for the diffuse map. |
+| `specularTexture` | `unsigned int` | `0` | OpenGL texture ID for the specular map. |
+
+### `SceneObject` struct
+
+The main unit of data held by a `Scene`.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | `string` | `""` | Identifier used by `Scene::find()`. |
+| `transform` | `Transform` | identity | Position, rotation, scale. |
+| `material` | `Material` | defaults | Shading properties. |
+| `mesh` | `shared_ptr<Mesh>` | `nullptr` | Single-mesh path (procedural geometry). |
+| `shader` | `shared_ptr<Shader>` | `nullptr` | Per-object shader. |
+| `model` | `shared_ptr<Model>` | `nullptr` | Multi-mesh path (Assimp model). When set, `model->meshes` is iterated instead of `mesh`. |
+| `visible` | `bool` | `true` | When `false`, object is skipped in all draw calls. |
+| `selected` | `bool` | `false` | When `true`, `drawSelected` draws a stencil outline around this object. |
+
+### `Scene` class
+
+Owns a `vector<SceneObject>`.
+
+#### `add()`
+```cpp
+SceneObject* add(SceneObject obj);
+```
+Moves `obj` into the internal vector and returns a pointer to the newly stored element.  
+?? Pointer is invalidated if the vector reallocates.
+
+#### `find()`
+```cpp
+SceneObject* find(const std::string& name);
+```
+Linear search by `name`. Returns `nullptr` if not found.
+
+#### `remove()`
+```cpp
+void remove(const std::string& name);
+```
+Erases the first object whose `name` matches. Uses erase-remove idiom.
+
+#### `objects()`
+```cpp
+const vector<SceneObject>& objects() const;
+      vector<SceneObject>& objects();
+```
+Direct access to the underlying storage (used by `Renderer`).
+
+---
+
+## 7. Transform
+
+**File:** `include/transform.h`  (header-only struct)
+
+Stores and manipulates an object's position, rotation (quaternion), and scale.
+
+### Fields
+
+| Field | Type | Default |
+|-------|------|---------|
+| `position` | `glm::vec3` | `{0, 0, 0}` |
+| `scale` | `glm::vec3` | `{1, 1, 1}` |
+| `rotation` | `glm::quat` | identity |
+
+### Methods
+
+#### Translation
+
+| Method | Description |
+|--------|-------------|
+| `setPosition(x, y, z)` | Set absolute world position. |
+| `setPosition(vec3)` | Vector overload. |
+| `translate(vec3)` | Add delta to current position. |
+| `translate(x, y, z)` | Scalar overload. |
+
+#### Scale
+
+| Method | Description |
+|--------|-------------|
+| `setScale(uniform)` | Uniform scale on all axes. |
+| `setScale(x, y, z)` | Non-uniform scale. |
+| `setScale(vec3)` | Vector overload. |
+| `scaleBy(factor)` | Multiply current scale by a uniform factor. |
+| `scaleBy(vec3)` | Per-axis multiply. |
+
+#### Rotation
+
+| Method | Description |
+|--------|-------------|
+| `setEuler(pitch, yaw, roll)` | Set rotation from Euler angles in **radians** (XYZ order). |
+| `setEuler(vec3)` | Vector overload. |
+| `rotate(angleDegrees, axis)` | Apply an additional rotation (pre-multiplied) in degrees around an axis. |
+| `setQuaternion(q)` | Set rotation directly from a normalised quaternion. |
+| `slerpTo(target, t)` | Spherically interpolate current rotation toward `target` by factor `t ? [0,1]`. |
+| `lookAt(direction, up)` | Orient the transform so its forward axis points toward `direction`. |
+
+#### Other
+
+| Method | Description |
+|--------|-------------|
+| `reset()` | Set position to zero, scale to 1, rotation to identity. |
+| `matrix()` | Returns the combined model matrix: **T × R × S**. |
+
+---
+
+## 8. Mesh
+
+**Files:** `include/mesh.h`, `src/mesh.cpp`
+
+Owns a set of `Vertex` + `indices` + `textures` and the corresponding OpenGL VAO/VBO/EBO.
+
+### `Vertex` struct
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Position` | `glm::vec3` | Vertex position. |
+| `Normal` | `glm::vec3` | Surface normal. |
+| `TexCoords` | `glm::vec2` | UV texture coordinates. |
+
+**Attribute layout (matches `cube.vert`):**
+- Location 0 ? `Position`
+- Location 1 ? `Normal`
+- Location 2 ? `TexCoords`
+
+### `Texture` struct
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `unsigned int` | OpenGL texture object ID. |
+| `type` | `string` | `"texture_diffuse"` or `"texture_specular"`. |
+| `path` | `string` | Absolute/relative path used to load (for deduplication). |
+
+### Constructors
+
+```cpp
+Mesh();  // default, no GPU objects
+Mesh(vector<Vertex>, vector<unsigned int>, vector<Texture>);  // uploads immediately
+Mesh(Mesh&& other) noexcept;   // transfers GPU ownership
+```
+Non-copyable (`Mesh(const Mesh&) = delete`). Each `Mesh` exclusively owns its VAO/VBO/EBO.
+
+### `operator=(Mesh&&)`
+Releases existing GPU objects, transfers ownership from `other`, zeroes `other`'s handles.
+
+### Destructor
+```cpp
+~Mesh();
+```
+Calls `glDeleteVertexArrays` and `glDeleteBuffers` for VAO, VBO, EBO.
+
+### Methods
+
+#### `Draw()`
+```cpp
+void Draw(Shader& shader);
+```
+Binds textures (iterating `textures`, setting sampler uniforms `texture_diffuseN` / `texture_specularN`) then issues `glDrawElements(GL_TRIANGLES, ...)`.
+
+#### `getVAO()`
+```cpp
+unsigned int getVAO() const;
+```
+Returns the GL VAO handle (useful for custom draw calls).
+
+#### `getIndexCount()`
+```cpp
+unsigned int getIndexCount() const;
+```
+Returns `indices.size()`.
+
+### Private Method
+
+#### `setupMesh()`
+Creates and configures VAO, VBO, EBO:
+- Uploads `vertices` via `glBufferData(GL_ARRAY_BUFFER, ..., GL_STATIC_DRAW)`.
+- Uploads `indices` via `glBufferData(GL_ELEMENT_ARRAY_BUFFER, ..., GL_STATIC_DRAW)`.
+- Sets three vertex attrib pointers at locations 0, 1, 2.
+
+---
+
+## 9. Model
+
+**Files:** `include/model.h`, `src/model.cpp`
+
+Loads a 3D model file via Assimp, producing a vector of `Mesh` objects.
+
+### Constructor
+
+```cpp
+Model(const char* path, bool gamma = false);
+```
+Calls `loadModel(path)`.
+
+| Parameter | Description |
+|-----------|-------------|
+| `path` | File path to any Assimp-supported format (`.obj`, `.fbx`, `.gltf`, etc.). |
+| `gamma` | If `true`, textures are loaded with sRGB internal format. |
+
+### Public Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `meshes` | `vector<Mesh>` | All meshes extracted from the model. |
+
+### Methods
+
+#### `Draw()`
+```cpp
+void Draw(Shader& shader);
+```
+Calls `Mesh::Draw(shader)` for every mesh in `meshes`.
+
+#### `DrawMesh()`
+```cpp
+void DrawMesh(Shader& shader, unsigned int index);
+```
+Draws a single mesh by index. No-op if `index >= meshes.size()`.
+
+#### `toScene()`
+```cpp
+void toScene(Scene& scene,
+             const std::string& baseName,
+             std::shared_ptr<Shader> shader,
+             const Material& mat = Material{});
+```
+Splits all meshes into individual `SceneObject`s and adds them to `scene`.
+
+- Each object gets name `"<baseName>"` (single mesh) or `"<baseName>_<i>"` (multiple meshes).
+- If a mesh carries its own textures, `material.useTexture` / `useSpecularMap` are set automatically.
+
+### Private Methods
+
+#### `loadModel()`
+```cpp
+void loadModel(std::string path);
+```
+Opens the file with `Assimp::Importer::ReadFile` (triangulate + flip UVs + gen smooth normals).
+On error, logs via `LOG_ERROR_F`. Extracts the directory prefix for texture relative paths.
+
+#### `processNode()`
+```cpp
+void processNode(aiNode* node, const aiScene* scene);
+```
+Recursively visits every node in the Assimp hierarchy; calls `processMesh` for each attached mesh.
+
+#### `processMesh()`
+```cpp
+Mesh processMesh(aiMesh* mesh, const aiScene* scene);
+```
+Converts an `aiMesh` to a `Mesh`:
+- Copies positions, normals (guarded against null), and UV channel 0.
+- Converts faces to flat index list.
+- Loads diffuse and specular textures via `loadMaterialTextures`.
+
+#### `loadMaterialTextures()`
+```cpp
+vector<Texture> loadMaterialTextures(aiMaterial* mat, aiTextureType type,
+                                     string typeName);
+```
+For every texture of the given type, constructs `directory + '/' + filename` and calls `TextureCache::get().load()`.
+
+---
+
+## 10. Shader
+
+**File:** `include/shader.h`  (header-only)
+
+Compiles, links, and caches uniforms for a GLSL shader program.
+
+### Constructors
+
+```cpp
+Shader(const char* vertexPath, const char* fragmentPath);
+Shader(const char* vertexPath, const char* fragmentPath, const char* geometryPath);
+```
+Reads source files from disk, compiles each stage, and links the program.  
+Non-copyable; movable.
+
+### Public Field
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ID` | `unsigned int` | GL program handle; `0` after a failed link or after move. |
+
+### Methods
+
+#### `use()`
+```cpp
+void use();
+```
+Calls `glUseProgram(ID)`.
+
+#### Uniform Setters
+
+All setters call `loc(name)` which performs a cached `glGetUniformLocation` lookup.
+
+| Method | GL Call |
+|--------|---------|
+| `setBool(name, value)` | `glUniform1i` |
+| `setInt(name, value)` | `glUniform1i` |
+| `setFloat(name, value)` | `glUniform1f` |
+| `setVec3(name, vec3)` | `glUniform3f` |
+| `setVec4(name, vec4)` | `glUniform4f` |
+| `setMat3(name, mat3)` | `glUniformMatrix3fv` |
+| `setMat4(name, mat4)` | `glUniformMatrix4fv` |
+
+### Private Methods
+
+#### `loc()`
+```cpp
+GLint loc(const std::string& name) const;
+```
+Returns a cached uniform location. On first call for a given `name`, calls `glGetUniformLocation` and stores the result in `m_locCache`.
+
+#### `readFile()`
+```cpp
+static std::string readFile(const char* path);
+```
+Reads a file to a `std::string`. Logs error and returns empty string on failure.
+
+#### `compileStage()`
+```cpp
+static unsigned int compileStage(GLenum type, const char* src, const char* label);
+```
+Creates and compiles a single shader stage. Logs compile errors.
+
+#### `compileAndLink()`
+```cpp
+static unsigned int compileAndLink(const char* vertSrc, const char* fragSrc, const char* geomSrc);
+```
+Compiles all stages, attaches them to a new program, links, then detaches and deletes stage objects. Logs link errors.
+
+---
+
+## 11. ComputeShader
+
+**File:** `include/shader_compute.h`  (header-only, all static methods)
+
+Utility class for OpenGL compute shaders and their associated SSBO buffers.
+
+### Static Methods
+
+#### `LoadComputeShader()`
+```cpp
+static GLuint LoadComputeShader(const string& filePath);
+```
+Reads, compiles (`GL_COMPUTE_SHADER`), and links a compute shader. Returns the program ID, or `0` on error.
+
+#### `CreateBuffer()`
+```cpp
+static GLuint CreateBuffer(size_t size, const void* data = nullptr,
+                            GLenum usage = GL_DYNAMIC_DRAW);
+```
+Creates a `GL_SHADER_STORAGE_BUFFER` of `size` bytes with optional initial data.
+
+#### `BindBuffer()`
+```cpp
+static void BindBuffer(GLuint buffer, GLuint binding);
+```
+Binds `buffer` to SSBO binding point `binding` via `glBindBufferBase`.
+
+#### `Dispatch()`
+```cpp
+static void Dispatch(GLuint program, GLuint numGroupsX,
+                     GLuint numGroupsY = 1, GLuint numGroupsZ = 1);
+```
+Calls `glUseProgram`, `glDispatchCompute`, then `glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)`.
+
+#### `GetThreadGroupSizes()`
+```cpp
+static GLuint GetThreadGroupSizes(int numThreads, int groupSize = 64);
+```
+Returns `ceil(numThreads / groupSize)`, the number of work groups needed to cover `numThreads` items with groups of `groupSize` threads.
+
+#### `ReadBuffer<T>()`
+```cpp
+template<typename T>
+static vector<T> ReadBuffer(GLuint buffer, size_t count);
+```
+Maps the SSBO as `GL_READ_ONLY`, copies `count * sizeof(T)` bytes into a `vector<T>`, then unmaps.
+
+#### `WriteBuffer<T>()`
+```cpp
+template<typename T>
+static void WriteBuffer(GLuint buffer, const vector<T>& data);
+```
+Re-allocates the SSBO (`glBufferData(nullptr)` to orphan), maps as write-invalidate, and copies data. Falls back to `glBufferSubData` if mapping fails.
+
+#### `Release()`
+```cpp
+static void Release(GLuint& buffer);
+```
+Deletes the buffer and zeroes the handle if non-zero.
+
+#### `ReleaseProgram()`
+```cpp
+static void ReleaseProgram(GLuint& program);
+```
+Deletes the program and zeroes the handle if non-zero.
+
+---
+
+## 12. Framebuffer
+
+**Files:** `include/framebuffer.h`, `src/framebuffer.cpp`
+
+Manages an off-screen OpenGL framebuffer, optionally with MSAA.
+
+### Constructor
+
+```cpp
+explicit Framebuffer(int width, int height, int samples = 4);
+```
+Creates the main FBO (MSAA when `samples > 1`) and, for MSAA, a resolve FBO.
+
+| Parameter | Description |
+|-----------|-------------|
+| `width`, `height` | Initial dimensions in pixels. |
+| `samples` | MSAA sample count. Use 1 for no anti-aliasing, 4 for standard MSAA. |
+
+### Destructor
+```cpp
+~Framebuffer();
+```
+Calls `destroy()`, deleting all GL objects.
+
+### Methods
+
+#### `bind()`
+```cpp
+void bind() const;
+```
+Binds the main MSAA FBO and sets `glViewport(0, 0, width, height)`.
+
+#### `unbind()`
+```cpp
+void unbind() const;
+```
+Binds framebuffer 0 (default back-buffer).
+
+#### `resize()`
+```cpp
+void resize(int width, int height);
+```
+Stores new dimensions, calls `destroy()` then `create()` to recreate all GL objects at the new size.
+
+#### `resolve()`
+```cpp
+void resolve() const;
+```
+For MSAA (`samples > 1`): blits the MSAA FBO to the resolve FBO using `glBlitFramebuffer(GL_COLOR_BUFFER_BIT, GL_NEAREST)`, making the result available as a sampleable `GL_TEXTURE_2D`.  
+No-op when `samples == 1`.
+
+#### Accessors
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getFBO()` | `unsigned int` | Main (MSAA) FBO handle. |
+| `getResolveFBO()` | `unsigned int` | Resolve FBO (or main FBO if not MSAA). |
+| `getColorTexture()` | `unsigned int` | Sampleable `GL_TEXTURE_2D` after `resolve()`. |
+| `getMSAATexture()` | `unsigned int` | Raw `GL_TEXTURE_2D_MULTISAMPLE` (only valid when MSAA). |
+| `getWidth()` | `int` | Current width. |
+| `getHeight()` | `int` | Current height. |
+| `getSamples()` | `int` | Sample count. |
+| `isComplete()` | `bool` | `glCheckFramebufferStatus == GL_FRAMEBUFFER_COMPLETE`. |
+
+### Private Methods
+
+#### `create()`
+Allocates all GL objects for the current `m_width`, `m_height`, `m_samples`:
+- MSAA path: `GL_TEXTURE_2D_MULTISAMPLE` color + RBO `GL_DEPTH24_STENCIL8` (multisampled).
+- Non-MSAA path: plain `GL_TEXTURE_2D` color + RBO `GL_DEPTH24_STENCIL8`.
+- If MSAA, also creates resolve FBO with a plain `GL_TEXTURE_2D`.
+
+#### `destroy()`
+Deletes all textures, renderbuffers, and framebuffers; zeroes all handles.
+
+---
+
+## 13. TextureCache
+
+**Files:** `include/texture_cache.h`, `src/texture_cache.cpp`
+
+Singleton that deduplicates GPU texture uploads.
+
+### Access
+
+```cpp
+static TextureCache& get();
+```
+Returns the single static instance.
+
+### Methods
+
+#### `load()`
+```cpp
+Texture load(const string& path, const string& typeName, bool gammaCorrect = false);
+```
+Returns a cached `Texture` if `path` was already loaded; otherwise calls `loadFromDisk`, stores the result, and returns it.
+
+| Parameter | Description |
+|-----------|-------------|
+| `path` | Absolute or relative path to the image file. |
+| `typeName` | `"texture_diffuse"` or `"texture_specular"` (stored in `Texture::type`). |
+| `gammaCorrect` | If `true`, uses `GL_SRGB` / `GL_SRGB_ALPHA` internal format. |
+
+#### `release()`
+```cpp
+void release(const string& path);
+```
+Deletes the GL texture for `path` and removes the entry from the cache.
+
+#### `clear()`
+```cpp
+void clear();
+```
+Deletes all GL textures and empties the map. Must be called before the GL context is destroyed.
+
+### Private Method
+
+#### `loadFromDisk()`
+```cpp
+unsigned int loadFromDisk(const string& path, bool gammaCorrect);
+```
+Uses `stb_image` to decode the image. Detects 1/3/4 channel images, selects the appropriate `internalFormat` and `dataFormat`, uploads via `glTexImage2D`, generates mipmaps, and sets wrap/filter parameters.  
+On failure: logs an error and uploads a 1×1 magenta fallback texture.
+
+---
+
+## 14. Light / LightList
+
+**File:** `include/light.h`  (header-only)
+
+### `PointLight` struct
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | `string` | `""` | Identifier for lookup. |
+| `position` | `glm::vec3` | `{0,2,0}` | World-space position. |
+| `color` | `glm::vec3` | `{1,1,1}` | Light color. |
+| `intensity` | `float` | `1.0f` | Multiplier applied to `color` when uploading uniforms. |
+| `constant` | `float` | `1.0f` | Attenuation constant term. |
+| `linear` | `float` | `0.09f` | Attenuation linear term. |
+| `quadratic` | `float` | `0.032f` | Attenuation quadratic term. |
+| `visible` | `bool` | `true` | Controls whether `LightHelper` draws this light's icon. |
+
+### `DirectionalLight` struct
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | `string` | `""` | Identifier for lookup. |
+| `direction` | `glm::vec3` | `{-0.2,-1,-0.3}` | Normalised direction toward the light source. |
+| `color` | `glm::vec3` | `{1,1,1}` | Light color. |
+| `intensity` | `float` | `1.0f` | Color multiplier. |
+| `visible` | `bool` | `true` | Controls helper visibility. |
+
+### `LightList` struct
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `points` | `vector<PointLight>` | empty | All point lights in the scene. |
+| `directionals` | `vector<DirectionalLight>` | empty | All directional lights. |
+| `ambientColor` | `glm::vec3` | `{1,1,1}` | Ambient light color. |
+| `ambientStrength` | `float` | `0.15f` | Global ambient multiplier. |
+
+#### `findPoint()`
+```cpp
+PointLight* findPoint(const string& name);
+```
+Linear search over `points` by name; returns `nullptr` if not found.
+
+#### `findDirectional()`
+```cpp
+DirectionalLight* findDirectional(const string& name);
+```
+Linear search over `directionals` by name; returns `nullptr` if not found.
+
+---
+
+## 15. LightHelper
+
+**File:** `include/light_helper.h`  (header-only)
+
+Renders debug visualization icons for lights. Non-copyable.
+
+### Methods
+
+#### `init()`
+```cpp
+void init();
+```
+Must be called once after a GL context exists. Loads `shaders/helper.vert/frag`, creates a low-poly `Sphere` (radius 1, 6 segments) for point lights, and a thin `Cuboid` (0.08 × 1 × 0.08) for directional lights.
+
+#### `draw()`
+```cpp
+void draw(const LightList& lights,
+          const Camera&    camera,
+          const glm::mat4& projection) const;
+```
+Sets `glPolygonMode(GL_LINE)`, uploads `uView`, `uProjection`, then:
+- For each visible `PointLight`: translates to `light.position`, scales by 0.15, calls `m_sphereMesh->Draw`.
+- For each visible `DirectionalLight`: rotates a unit cuboid to align the Y-axis with `light.direction`, scales by `1.5 * intensity`, calls `m_arrowMesh->Draw`.  
+Restores `GL_FILL` on exit.
+
+---
+
+## 16. CameraHelper
+
+**File:** `include/camera_helper.h`  (header-only)
+
+Visualises a camera's view frustum as a wireframe box. Non-copyable.
+
+### Methods
+
+#### `init()`
+```cpp
+void init();
+```
+Loads `shaders/helper.vert/frag` and creates a VAO+VBO (dynamic, 8 × `glm::vec3`) + EBO (24 line indices for the 12 box edges).
+
+#### `draw()`
+```cpp
+void draw(const Camera&    target,
+          const Camera&    observer,
+          const glm::mat4& projection,
+          float            aspect,
+          glm::vec3        color = {1, 0.95, 0}) const;
+```
+Calls `updateCorners(target, aspect)`, uploads uniforms (`identity model`, observer view, projection, color), sets `glPolygonMode(GL_LINE)`, issues `glDrawElements(GL_LINES, 24, ...)`, then restores fill.
+
+| Parameter | Description |
+|-----------|-------------|
+| `target` | Camera whose frustum is visualised. |
+| `observer` | Camera used as the rendering viewpoint. |
+| `projection` | Observer's projection matrix. |
+| `aspect` | Aspect ratio used to reconstruct target's projection. |
+| `color` | Wireframe color (default: bright yellow). |
+
+### Private Methods
+
+#### `buildDynamic()`
+Allocates VAO, dynamic VBO (`GL_DYNAMIC_DRAW`, 8 vertices), and static EBO with 24 line-pair indices connecting the 8 frustum corners.
+
+#### `updateCorners()`
+```cpp
+void updateCorners(const Camera& cam, float aspect) const;
+```
+Computes `invVP = inverse(cam.GetProjectionMatrix(aspect) * cam.GetViewMatrix())`.
+Transforms 8 NDC corners `{±1, ±1, ±1}` through `invVP` and performs perspective divide to get world-space corners.
+Uploads to the dynamic VBO via `glBufferSubData`.
+
+#### `destroyDynamic()`
+Deletes VAO, VBO, EBO.
+
+---
+
+## 17. Geometry — GeometryData
+
+**Files:** `geometry/include/geometry_data.h`, `geometry/geometry_data.cpp`
+
+Central, flexible vertex-attribute container. Acts as a builder for `Mesh` objects.
+
+### Supporting Structures
+
+#### `Triangle`
+```cpp
+struct Triangle {
+    float vertex1[3], vertex2[3], vertex3[3];
+    Triangle(x1,y1,z1, x2,y2,z2, x3,y3,z3);
+};
+```
+Simple three-vertex triangle in world space.
+
+### Methods
+
+#### `addAttribute()`
+```cpp
+void addAttribute(const string& name, int components, const vector<float>& data);
+```
+Stores a flat float array under `name` with `components` floats per vertex.
+
+| Conventional names | Components | Meaning |
+|--------------------|------------|---------|
+| `"v_pos"` | 3 | XYZ positions |
+| `"v_norm"` | 3 | XYZ normals |
+| `"v_uv"` | 2 | UV texture coordinates |
+
+#### `setIndices()`
+```cpp
+void setIndices(const vector<unsigned int>& idx);
+```
+Stores triangle indices (every 3 form a triangle).
+
+#### `countVertices()`
+```cpp
+size_t countVertices() const;
+```
+Returns `m_attributes["v_pos"].size() / components`. Falls back to 0 if `"v_pos"` is absent.
+
+#### `countIndices()`
+```cpp
+size_t countIndices() const;
+```
+Returns `m_indices.size()`.
+
+#### `getTriangles()`
+```cpp
+vector<Triangle> getTriangles() const;
+```
+Extracts triangles from `"v_pos"` data. Uses `m_indices` if present; otherwise treats sequential groups of 3 vertices as triangles. Returns empty vector if `"v_pos"` doesn't exist or doesn't have 3 components.
+
+#### `toMesh()`
+```cpp
+Mesh toMesh() const;
+```
+Converts all stored attributes to a `Mesh`:
+- Fills `Vertex::Position` from `"v_pos"` (default: `{0,0,0}`).
+- Fills `Vertex::Normal` from `"v_norm"` (default: `{0,1,0}`).
+- Fills `Vertex::TexCoords` from `"v_uv"` (default: `{0,0}`).
+- If no indices: generates sequential `0, 1, 2, …, N-1`.
+- Calls `Mesh(vertices, indices, {})`.
+
+#### `merge()`
+```cpp
+void merge(const GeometryData& other);
+```
+Appends `other`'s vertices to `this`, offsets all of `other`'s indices by `countVertices()`, and appends them.  
+Missing attributes are padded with zeros to keep vertex alignment.
+
+#### `clear()`
+```cpp
+void clear();
+```
+Empties all attribute maps and the index array.
+
+---
+
+## 18. Geometry — Cuboid
+
+**File:** `geometry/include/cube.h`  (header-only)
+
+Extends `GeometryData`. Builds a 6-face box with unique normals per face (no shared vertices).
+
+### Constructors
+
+```cpp
+Cuboid(float width, float height, float depth);
+Cuboid(float length);   // uniform cube
+```
+
+**Geometry:**
+- 24 vertices (4 per face).
+- 36 indices (2 triangles × 3 vertices × 6 faces).
+- Normals: axis-aligned per face (`+X`, `-X`, `+Y`, `-Y`, `+Z`, `-Z`).
+- UVs: `[0,1]²` per face (not atlas-mapped).
+
+---
+
+## 19. Geometry — Polygon
+
+**Files:** `geometry/include/polygon.h`, `geometry/polygon.cpp`
+
+Extends `GeometryData`. Builds a flat, regular N-sided polygon on the XY plane.
+
+### Constructor
+
+```cpp
+Polygon(int sides, float radius);
+```
+
+**Geometry:**
+- Fan triangulation: `sides × 3` vertices (center + 2 rim vertices per triangle).
+- All normals point in `+Z` direction.
+- UVs mapped so the center is `(0.5, 0.5)` and rim vertices lie on a unit circle in UV space.
+
+---
+
+## 20. Geometry — ParametricSurface
+
+**Files:** `geometry/include/parametric.h`, `geometry/parametric.cpp`
+
+Extends `GeometryData`. Generates a surface mesh from a user-supplied parametric function.
+
+### Constructor
+
+```cpp
+ParametricSurface();
+```
+
+### Methods
+
+#### `generateMesh()`
+```cpp
+void generateMesh(float uStart, float uEnd, int uSegments,
+                  float vStart, float vEnd, int vSegments,
+                  function<glm::vec3(float, float)> surface_fn);
+```
+Generates a grid of `(uSegments+1) × (vSegments+1)` vertices by sampling `surface_fn(u, v)`.
+
+| Parameter | Description |
+|-----------|-------------|
+| `uStart`, `uEnd` | Parameter range in the U direction. |
+| `uSegments` | Number of subdivisions in U. |
+| `vStart`, `vEnd` | Parameter range in the V direction. |
+| `vSegments` | Number of subdivisions in V. |
+| `surface_fn` | Callable `(float u, float v) ? glm::vec3` defining the surface. |
+
+**Normal computation:** Finite-difference cross-product of tangent vectors `?P/?u` and `?P/?v`, with outward orientation enforcement. Degenerate cases fall back to `normalize(P)` or `{0,1,0}`.
+
+**UVs:** Normalized `(u_idx / uSegments, v_idx / vSegments)`.
+
+**Indices:** Two triangles per grid quad (quads split along the `[i0,i2]` diagonal).
+
+---
+
+## 21. Geometry — Sphere
+
+**Files:** `geometry/include/sphere.h`, `geometry/sphere.cpp`
+
+Extends `ParametricSurface`. Builds a UV sphere.
+
+### Constructor
+
+```cpp
+Sphere(float radius, int rSegments);
+```
+
+**Parametric function:**
+```
+x = (radius/2) * sin(u) * cos(v)
+y = (radius/2) * cos(u)
+z = (radius/2) * sin(u) * sin(v)
+```
+- U range: `[0, 2?]` with `rSegments` subdivisions.
+- V range: `[-?/2, ?/2]` with `rSegments` subdivisions.
+
+---
+
+## 22. Geometry — Circle
+
+**File:** `geometry/include/circle.h`
+
+Extends `Polygon`. A circle is simply a high-segment-count polygon.
+
+### Constructor
+
+```cpp
+Circle(int segments = 32, float radius = 1.0f);
+```
+Delegates to `Polygon(segments, radius)`.
+
+---
+
+## 23. Logger
+
+**Files:** `utils/include/logger.h`, `utils/logger.cpp`
+
+Thread-safe, file-backed logger with level filtering, log rotation, optional stream redirection, and console color support.
+
+### Enumeration
+
+```cpp
+enum class LogLevel { DEBUG = 0, INFO = 1, WARN = 2, ERROR = 3 };
+```
+
+### Static Methods
+
+#### `init()`
+```cpp
+static void init(const string& logDir,
+                 LogLevel minLevel      = LogLevel::INFO,
+                 bool redirectStreams   = true,
+                 size_t maxFileSizeMB   = 50);
+```
+Creates `logDir`, opens a timestamped log file (`log_YYYYMMDD_HHMMSS_ms_pid.log`), writes a session header, and optionally redirects `std::cout` and `std::cerr` to the log stream.
+
+#### `shutdown()`
+```cpp
+static void shutdown();
+```
+Logs a shutdown message, writes a footer, restores `cout`/`cerr` if redirected, closes the log file, and sets `s_isSilent = true` to suppress logging from destructors.
+
+#### `log()`
+```cpp
+static void log(LogLevel level, const string& msg, const char* file, int line);
+```
+Formats `"YYYY-MM-DD HH:MM:SS.mmm [LEVEL] message (filename:line)"` and writes to file. When not initialized, writes to `stderr` with optional ANSI color.  
+Calls `rotateLogIfNeeded()` before writing to handle file-size limits.
+
+#### `setMinLevel()` / `getMinLevel()`
+Get/set the minimum level at runtime. Messages below the minimum are discarded.
+
+#### `getCurrentLogFile()`
+Returns the active log file path.
+
+#### `isInitialized()`
+Returns `true` after `init()` and before `shutdown()`.
+
+#### `flush()`
+Forces an `s_logStream.flush()`.
+
+#### `setSilent()` / `isSilent()`
+Toggle silent mode; when silent, all log calls are no-ops.
+
+#### `setConsoleColors()` / `consoleColorsEnabled()`
+Toggle ANSI color codes in console output.
+
+### Macros
+
+| Macro | Description |
+|-------|-------------|
+| `LOG_DEBUG(msg)` | Log at DEBUG level. |
+| `LOG_INFO(msg)` | Log at INFO level. |
+| `LOG_WARN(msg)` | Log at WARN level. |
+| `LOG_ERROR(msg)` | Log at ERROR level. |
+| `LOG_DEBUG_F(fmt, ...)` | `snprintf`-formatted DEBUG log. |
+| `LOG_INFO_F(fmt, ...)` | `snprintf`-formatted INFO log. |
+| `LOG_WARN_F(fmt, ...)` | `snprintf`-formatted WARN log. |
+| `LOG_ERROR_F(fmt, ...)` | `snprintf`-formatted ERROR log. |
+
+All macros capture `__FILE__` and `__LINE__` automatically.
+
+### Private Methods
+
+| Method | Description |
+|--------|-------------|
+| `getLevelString(level)` | Returns `"DEBUG"` / `"INFO "` / `"WARN "` / `"ERROR"`. |
+| `getColorCode(level)` | Returns ANSI escape codes (cyan/green/yellow/red). |
+| `extractFilename(path)` | Strips directory prefix from `__FILE__`. |
+| `writeSessionHeader()` | Writes `=== Logger started ===` header block to the log file. |
+| `rotateLogIfNeeded()` | If the log file exceeds `maxFileBytes`, closes and opens a new `_partNNN` file. |
+| `buildTimestamp()` | Returns `"YYYY-MM-DD HH:MM:SS.mmm"`. |
+| `writeConsole(msg, color)` | Writes to `cerr` with optional ANSI color reset. |
+
+---
+
+## 24. PerformanceProfiler / ScopedTimer
+
+**Files:** `utils/include/profiler.h`, `utils/profiler.cpp`
+
+Lightweight, thread-safe performance profiler with hierarchical timer tracking.
+
+### Global Instances
+
+```cpp
+extern PerformanceProfiler g_profiler;
+extern atomic<bool> g_profilerEnabled;
+```
+
+### `PerformanceProfiler` Methods
+
+#### `startTimer()` / `endTimer()`
+```cpp
+void startTimer(const string& label);
+void endTimer(const string& label);
+```
+Begin/end a named timer. Timers are maintained on a per-thread LIFO stack, so nested timers work correctly. On `endTimer`, computes inclusive time, then contributes exclusive time to the parent (if any).
+
+#### `setEnabled()` / `isEnabled()`
+Enable or disable the profiler. When disabled, `startTimer`/`endTimer` are no-ops.
+
+#### `report()`
+```cpp
+void report() const;
+```
+Logs the full profiling report via `Logger::INFO`.
+
+#### `writeReportToFile()`
+```cpp
+void writeReportToFile() const;
+```
+Writes the report to a file in `outputDirectory`.
+
+#### `setOutputDirectory()` / `getOutputDirectory()`
+Control where `writeReportToFile` saves its output (default: `"profilelog"`).
+
+#### `setVerbose()` / `isVerbose()`
+When verbose, per-call timing is emitted immediately on `endTimer`.
+
+#### `clear()`
+Resets all accumulated data.
+
+#### `getDetailedItems()`
+```cpp
+vector<DetailedItem> getDetailedItems() const;
+```
+Returns all timers sorted by inclusive time (descending), each with:
+- `name`, `inclusiveMicros`, `exclusiveMicros`, `callCount`
+- `rootInclusiveMicros`, `rootCallCount` (when started at stack depth 0).
+
+#### `getChildItemsDetailed()`
+```cpp
+vector<ChildItem> getChildItemsDetailed(const string& parent) const;
+```
+Returns child timer contributions under `parent`, sorted by inclusive time.
+
+#### `getRootItems()`
+Returns timers that were started at the top of the stack, sorted by time.
+
+#### `getSortedItems()`
+Backward-compatible: returns `(name, inclusiveMicros)` pairs sorted by time.
+
+### `ScopedTimer`
+
+```cpp
+struct ScopedTimer {
+    explicit ScopedTimer(const string& n);
+    ~ScopedTimer();
+};
+```
+RAII wrapper: calls `g_profiler.startTimer(n)` on construction and `g_profiler.endTimer(n)` on destruction.
+
+**Usage:**
+```cpp
+{
+    ScopedTimer t("my_operation");
+    // ... code to profile ...
+}  // timer stops here
+```
+
+---
+
+## 25. ThreadPool / TaskQueue / Thread
+
+**File:** `utils/include/thread_pool.h`  (header-only)
+
+### `TaskQueue` struct
+
+Internal work queue shared by all worker threads.
+
+| Method | Description |
+|--------|-------------|
+| `addTask(func)` | Locks mutex, pushes task, increments `taskCount`, notifies one thread. |
+| `getTask(func)` | Blocks until a task is available or shutdown; pops and returns the task. |
+| `requestShutdown()` | Sets `shutdown = true` and wakes all threads. |
+| `waitForAll()` | Spin-yields until `taskCount == 0`. |
+
+### `Thread` struct
+
+Wraps a `std::thread` that loops on `getTask` ? calls task ? repeats until shutdown.  
+Exceptions from tasks are caught and logged via `LOG_ERROR_F`.
+
+| Method | Description |
+|--------|-------------|
+| `Thread(id, queue)` | Constructor: spawns `cur_thread` running `run()`. |
+| `run()` | Worker loop. |
+| `stop()` | Joins the underlying `std::thread` if joinable. |
+
+### `ThreadPool` class
+
+#### Constructor
+```cpp
+explicit ThreadPool(int n = std::thread::hardware_concurrency());
+```
+Spawns `n` worker threads. Throws `std::invalid_argument` if `n <= 0`.
+
+#### Destructor / `shutdown()`
+```cpp
+~ThreadPool();
+void shutdown();
+```
+`shutdown()` signals `requestShutdown()` and joins all threads. Called automatically by destructor. Idempotent (guarded by `destroyed` atomic flag).
+
+#### `enqueue()`
+```cpp
+template<typename Func, typename... Args>
+auto enqueue(Func&& f, Args&&... args) -> future<decltype(f(args...))>;
+```
+Wraps `f(args...)` in a `packaged_task`, adds it to the queue, and returns a `std::future`. Throws `std::runtime_error` if called on a destroyed pool.
+
+#### `parallelFor()`
+```cpp
+void parallelFor(int start, int end, function<void(int)> func);
+```
+Enqueues one task per index in `[start, end)` and waits for all to complete.
+
+#### Accessors
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getThreadCount()` | `size_t` | Number of worker threads. |
+| `getPendingTaskCount()` | `size_t` | Tasks not yet started. |
+
+---
+
+## 26. BoundingBox
+
+**Files:** `include/bounding_box.h`, `src/bounding_box.cpp`
+
+> ?? Currently excluded from the build (`bounding_box.cpp` is listed in the CMake removal list). The class is present but incomplete.
+
+Provides a wireframe axis-aligned bounding box for visualization.
+
+### Constructor
+
+```cpp
+BoundingBox(const glm::vec3& size);
+```
+Intended to build a VAO/VBO/EBO for a box of the given size.
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `Render(view, projection)` | Draw the wireframe box. |
+| `SetModelMatrix(model)` | Set the model transform. |
+
+---
+
+## 27. Shaders
+
+**Directory:** `shaders/`
+
+All shaders target **GLSL 4.30 core**.
+
+### `cube.vert` / `cube.frag` — Blinn-Phong Lighting
+
+**Vertex inputs:**
+
+| Location | Name | Type | Description |
+|----------|------|------|-------------|
+| 0 | `aPos` | `vec3` | Object-space position. |
+| 1 | `aNormal` | `vec3` | Object-space normal. |
+| 2 | `aTexCoords` | `vec2` | UV coordinates. |
+
+**Uniforms:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `uModel` | `mat4` | Model matrix. |
+| `uView` | `mat4` | View matrix. |
+| `uProjection` | `mat4` | Projection matrix. |
+| `uNormalMatrix` | `mat3` | Transpose-inverse of model (for normal transform). |
+| `uLightPos` | `vec3` | World-space point light position. |
+| `uLightColor` | `vec3` | Point light color. |
+| `uLightConstant/Linear/Quadratic` | `float` | Attenuation coefficients. |
+| `uAmbientColor` | `vec3` | Scene ambient color. |
+| `uAmbientStrength` | `float` | Ambient intensity multiplier. |
+| `uViewPos` | `vec3` | Camera world position (for specular). |
+| `uObjectColor` | `vec3` | Fallback diffuse color. |
+| `uSpecularColor` | `vec3` | Fallback specular color. |
+| `uShininess` | `float` | Blinn-Phong specular exponent. |
+| `uUseTexture` | `bool` | Sample `texture_diffuse1` if true. |
+| `uUseSpecularMap` | `bool` | Sample `texture_specular1` if true. |
+| `texture_diffuse1` | `sampler2D` | Diffuse texture (unit 0). |
+| `texture_specular1` | `sampler2D` | Specular map (unit 1). |
+
+**Lighting model:** `FragColor = (ambient + diffuse + specular) * baseColor`  
+- **Attenuation:** `1 / (C + L·d + Q·d²)`  
+- **Diffuse:** `max(dot(N, L), 0) * lightColor * atten`  
+- **Specular (Blinn-Phong):** `pow(max(dot(N, H), 0), shininess) * specSample * lightColor * atten`
+
+---
+
+### `outline.vert` / `outline.frag` — Stencil Outline
+
+Flat unlit shader for the selection outline second pass.
+
+**Uniforms:** `uModel`, `uView`, `uProjection`, `uOutlineColor (vec3)`
+
+**Output:** Solid `vec4(uOutlineColor, 1.0)` for every fragment.
+
+---
+
+### `infinite_grid.vert` / `infinite_grid.frag` — Infinite LOD Grid
+
+Screen-filling quad with no VBO; vertex positions computed from a 4-element constant array.
+
+**Vertex uniforms:** `gVP (mat4)`, `gGridSize (float)`, `gCameraWorldPos (vec3)`
+
+**Fragment uniforms:**
+
+| Name | Default | Description |
+|------|---------|-------------|
+| `gCameraWorldPos` | — | Used for edge falloff. |
+| `gGridSize` | `100.0` | Fade radius. |
+| `gGridMinPixelsBetweenCells` | `2.0` | Min screen pixels between lines before LOD switch. |
+| `gGridCellSize` | `0.025` | Base cell size at LOD 0. |
+| `gGridColorThin` | `(0.5,0.5,0.5,1)` | Color for fine grid lines. |
+| `gGridColorThick` | `(0,0,0,1)` | Color for coarse grid lines. |
+| `gGridAlpha` | `0.5` | Global opacity scale. |
+
+**LOD:** Uses `dFdx`/`dFdy` screen-space derivatives to compute pixel density; selects three LOD levels (`LOD0`, `LOD1 = LOD0×10`, `LOD2 = LOD0×100`) and blends between them. Fragments with `alpha < 0.01` are discarded.
+
+---
+
+### `helper.vert` / `helper.frag` — Debug Helpers
+
+Simple pass-through shader for `LightHelper` and `CameraHelper`.
+
+**Uniforms:** `uModel`, `uView`, `uProjection`, `uColor (vec3)`
+
+**Output:** Solid `vec4(uColor, 1.0)` for every fragment.
