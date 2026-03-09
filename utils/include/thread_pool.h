@@ -6,9 +6,9 @@
 #include <functional>
 #include <future>
 #include <condition_variable>
-#include <iostream>
 #include <memory>
 #include <atomic>
+#include "logger.h"
 
 struct TaskQueue {
     std::queue<std::function<void()>> tasks;
@@ -68,16 +68,15 @@ struct Thread{
     void run(){
         while(true){
             if (!taskQueue->getTask(task)) {
-                break; // Shutdown requested
+                break;
             }
-            
             if(task){ 
                 try {
                     task();
                 } catch (const std::exception& e) {
-                    std::cerr << "Task exception in thread " << id << ": " << e.what() << std::endl;
+                    LOG_ERROR_F("ThreadPool: task exception in thread %d: %s", id, e.what());
                 } catch (...) {
-                    std::cerr << "Unknown exception in thread " << id << std::endl;
+                    LOG_ERROR_F("ThreadPool: unknown exception in thread %d", id);
                 }
                 task = nullptr;
             }
@@ -159,4 +158,4 @@ public:
     size_t getPendingTaskCount() const { return taskQueue.taskCount.load(); }
 };
 
-#endif // THREAD_POOL_H
+#endif // THREAD_POOL_H#endif // THREAD_POOL_H

@@ -1,16 +1,14 @@
-#define STB_IMAGE_IMPLEMENTATION
 #include <model.h>
-
-unsigned int TextureFromFile(const char *path, const std::string &directory, bool gamma = false);
+#include "texture_cache.h"
+#include "logger.h"
 
 void Model::loadModel(std::string path)
 {
     Assimp::Importer import;
-    // Request generation of smooth normals if the model doesn't provide them
     const aiScene *scene = import.ReadFile(path, aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenSmoothNormals);
     
     if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode){
-        std::cout << "ERROR::ASSIMP::" << import.GetErrorString() << std::endl;
+        LOG_ERROR_F("Model: Assimp error loading \"%s\": %s", path.c_str(), import.GetErrorString());
         return;
     }
     // Support both POSIX and Windows path separators when extracting directory
@@ -88,24 +86,20 @@ Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
     for(unsigned int i = 0; i < mesh->mNumFaces; i++)
     {
         aiFace face = mesh->mFaces[i];
-        for(unsigned int j = 0; j < face.mNumIndices; j++){
+        for(unsigned int j = 0; j < face.mNumIndices; j++)
             indices.push_back(face.mIndices[j]);
-        }
     }
     
     if(mesh->mMaterialIndex >= 0)
     {
         aiMaterial *material = scene->mMaterials[mesh->mMaterialIndex];
-        std::vector<Texture> diffuseMaps = loadMaterialTextures(material, 
-                                            aiTextureType_DIFFUSE, "texture_diffuse");
-        textures.insert(textures.end(), diffuseMaps.begin(), diffuseMaps.end());
-        std::vector<Texture> specularMaps = loadMaterialTextures(material, 
-                                            aiTextureType_SPECULAR, "texture_specular");
+        std::vector<Texture> diffuseMaps  = loadMaterialTextures(material, aiTextureType_DIFFUSE,  "texture_diffuse");
+        std::vector<Texture> specularMaps = loadMaterialTextures(material, aiTextureType_SPECULAR, "texture_specular");
+        textures.insert(textures.end(), diffuseMaps.begin(),  diffuseMaps.end());
         textures.insert(textures.end(), specularMaps.begin(), specularMaps.end());
     }  
-     
 
-    return Mesh(vertices, indices, textures);
+    return Mesh(std::move(vertices), std::move(indices), std::move(textures));
 }
 
 std::vector<Texture> Model::loadMaterialTextures(aiMaterial *mat, aiTextureType type, std::string typeName)
@@ -115,82 +109,53 @@ std::vector<Texture> Model::loadMaterialTextures(aiMaterial *mat, aiTextureType 
     {
         aiString str;
         mat->GetTexture(type, i, &str);
-        bool skip = false;
-        for(unsigned int j = 0; j < textures_loaded.size(); j++)
-        {
-            if(std::strcmp(textures_loaded[j].path.data(), str.C_Str()) == 0)
-            {
-                textures.push_back(textures_loaded[j]);
-                skip = true; 
-                break;
-            }
-        }
-        if(!skip)
-        {   // if texture hasn't been loaded already, load it
-            Texture texture;
-            texture.id = TextureFromFile(str.C_Str(), directory);
-            texture.type = typeName;
-            texture.path = str.C_Str();
-            textures.push_back(texture);
-            textures_loaded.push_back(texture); // add to loaded textures
-        }
+        std::string fullPath = directory + '/' + str.C_Str();
+        textures.push_back(TextureCache::get().load(fullPath, typeName, gammaCorrection));
     }
     return textures;
 }  
 
 void Model::Draw(Shader &shader)
 {
-    for (unsigned int i = 0; i < meshes.size(); i++){
+    for (unsigned int i = 0; i < meshes.size(); i++)
         meshes[i].Draw(shader);
-    }
-}
-
-
-unsigned int TextureFromFile(const char *path, const std::string &directory, bool gamma)
-{
-    std::string filename = std::string(path);
-    filename = directory + '/' + filename;
-
-    unsigned int textureID;
-    glGenTextures(1, &textureID);
-
-    int width, height, nrComponents;
-    stbi_set_flip_vertically_on_load(true);
-    unsigned char *data = stbi_load(filename.c_str(), &width, &height, &nrComponents, 0);
-    if (data)
-    {
-        GLenum format = GL_RGB; // Default to RGB
-        if (nrComponents == 1)
-            format = GL_RED;
-        else if (nrComponents == 3)
-            format = GL_RGB;
-        else if (nrComponents == 4)
-            format = GL_RGBA;
-
-        glBindTexture(GL_TEXTURE_2D, textureID);
-        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
-        glGenerateMipmap(GL_TEXTURE_2D);
-
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-        stbi_image_free(data);
-    }
-    else
-    {
-        std::cout << "Texture failed to load at path: " << path << std::endl;
-        stbi_image_free(data);
-    }
-
-    return textureID;
 }
 
 void Model::DrawMesh(Shader &shader, unsigned int index)
 {
     if (index < meshes.size())
-    {
         meshes[index].Draw(shader);
+}
+
+void Model::toScene(Scene& scene,
+                    const std::string& baseName,
+                    std::shared_ptr<Shader> shader,
+                    const Material& mat)
+{
+    for (unsigned int i = 0; i < meshes.size(); ++i)
+    {
+        SceneObject obj;
+        obj.name     = baseName + (meshes.size() > 1 ? "_" + std::to_string(i) : "");
+        obj.shader   = shader;
+        obj.material = mat;
+        obj.mesh     = std::make_shared<Mesh>(std::move(meshes[i]));
+
+        // If the mesh has its own textures, let the material reflect that
+        if (!meshes[i].textures.empty())
+        {
+            obj.material.useTexture = true;
+            for (const auto& tex : meshes[i].textures)
+            {
+                if (tex.type == "texture_diffuse" && obj.material.diffuseTexture == 0)
+                    obj.material.diffuseTexture = tex.id;
+                else if (tex.type == "texture_specular" && obj.material.specularTexture == 0)
+                {
+                    obj.material.specularTexture = tex.id;
+                    obj.material.useSpecularMap  = true;
+                }
+            }
+        }
+
+        scene.add(std::move(obj));
     }
 }
