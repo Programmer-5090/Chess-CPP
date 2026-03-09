@@ -17,7 +17,7 @@ Renderer::Renderer(int width, int height, float fovDegrees)
     m_lightHelper.init();
     m_cameraHelper.init();
     m_outlineShader = std::make_unique<Shader>("shaders/outline.vert",      "shaders/outline.frag");
-    m_gridShader    = std::make_unique<Shader>("shaders/infinite_grid.vs",   "shaders/infinite_grid.fs");
+    m_gridShader    = std::make_unique<Shader>("shaders/infinite_grid.vert",   "shaders/infinite_grid.frag");
     glGenVertexArrays(1, &m_gridVAO);
 }
 
