@@ -118,8 +118,8 @@ int main()
         framebuffer.bind();
         renderer.beginFrame();
 
-        renderer.drawScene(scene, camera);
         renderer.drawGrid(camera);
+        renderer.drawScene(scene, camera);
         renderer.drawSelected(scene, camera);
 
         renderer.endFrame();

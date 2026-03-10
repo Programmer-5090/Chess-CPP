@@ -7,83 +7,80 @@ dependency tree for the Chess CPP project.
 
 ## 1. Frame Render Pipeline
 
-Every frame produced by `main.cpp` passes through the following ordered stages.
+Every frame produced by `main.cpp` passes through the following ordered stages:
 
-```
-???????????????????????????????????????????????????????????????????????????????
-?  main()  —  per-frame loop                                                  ?
-?                                                                             ?
-?  1. Timer::tick()                                                           ?
-?     ?? compute deltaTime (SDL_GetTicks delta / 1000)                       ?
-?                                                                             ?
-?  2. processInputs()                                                         ?
-?     ?? Input::update()  ? SDL_PollEvent loop                               ?
-?     ?   ?? keyboard down/up/held sets                                       ?
-?     ?   ?? mouse position + delta                                           ?
-?     ?   ?? SDL_EVENT_WINDOW_RESIZED ?                                       ?
-?     ?       ?? Renderer::onResize(w, h)                                     ?
-?     ?       ?? Framebuffer::resize(w, h)                                   ?
-?     ?? Escape / shouldQuit ? running = false                               ?
-?     ?? Tab ? toggle SDL relative mouse mode                                ?
-?                                                                             ?
-?  3. Camera::ProcessInput()  (when mouseCaptured)                            ?
-?     ?? W/S/A/D/E/Q ? Camera::ProcessKeyboard()                             ?
-?     ?? mouse delta  ? Camera::ProcessMouseMovement()                       ?
-?                                                                             ?
-?  4. Game logic                                                              ?
-?     ?? rotate cube: SceneObject::transform.setEuler()                      ?
-?                                                                             ?
-?  5. Off-screen render pass                                                  ?
-?     ?                                                                       ?
-?     ?? Framebuffer::bind()   ? bind MSAA FBO + set viewport                ?
-?     ?                                                                       ?
-?     ?? Renderer::beginFrame()                                               ?
-?     ?   ?? glClear(COLOR | DEPTH | STENCIL)                                ?
-?     ?                                                                       ?
-?     ?? Renderer::drawScene(scene, camera)                                  ?
-?     ?   ?? camera.GetViewMatrix()        ? m_view                          ?
-?     ?   ?? camera.GetProjectionMatrix()  ? m_projection                    ?
-?     ?   ?? glStencilOp(KEEP, KEEP, REPLACE)                                ?
-?     ?   ?? for each visible SceneObject with a shader + geometry:          ?
-?     ?       ?? glStencilFunc(ALWAYS, 1, 0xFF)                              ?
-?     ?       ?? Renderer::pushUniforms()                                    ?
-?     ?       ?   ?? uProjection, uView, uModel, uNormalMatrix               ?
-?     ?       ?   ?? uLightPos/Color/Constant/Linear/Quadratic               ?
-?     ?       ?   ?? uAmbientColor / uAmbientStrength                        ?
-?     ?       ?   ?? uObjectColor / uSpecularColor / uShininess              ?
-?     ?       ?   ?? bind GL_TEXTURE_2D for diffuse + specular               ?
-?     ?       ?? drawObject()                                                 ?
-?     ?           ?? (Model path) for each Mesh: Mesh::Draw(shader)          ?
-?     ?           ?   ?? glDrawElements(GL_TRIANGLES, ...)                   ?
-?     ?           ?? (Mesh path)  Mesh::Draw(shader)                         ?
-?     ?               ?? glDrawElements(GL_TRIANGLES, ...)                   ?
-?     ?                                                                       ?
-?     ?? Renderer::drawGrid(camera)                                          ?
-?     ?   ?? m_gridShader uniforms: gVP, gCameraWorldPos, grid params        ?
-?     ?   ?? glDepthMask(GL_FALSE) + glEnable(GL_BLEND)                     ?
-?     ?   ?? glBindVertexArray(m_gridVAO)                                    ?
-?     ?   ?? glDrawArrays(GL_TRIANGLES, 0, 6)  ? VS uses gl_VertexID        ?
-?     ?                                                                       ?
-?     ?? Renderer::drawSelected(scene, camera)  ? stencil outline            ?
-?     ?   ?? Pass 1 — write stencil = 1 for selected objects                 ?
-?     ?   ?   ?? same pushUniforms + drawObject as drawScene                 ?
-?     ?   ?? Pass 2 — draw scaled-up mesh where stencil ? 1                 ?
-?     ?       ?? glStencilFunc(NOTEQUAL, 1, 0xFF)                            ?
-?     ?       ?? glDisable(GL_DEPTH_TEST)                                    ?
-?     ?       ?? m_outlineShader: uProjection, uView, uModel, uOutlineColor  ?
-?     ?       ?? drawObject() with scaled transform                          ?
-?     ?                                                                       ?
-?     ?? Renderer::endFrame()  (currently a no-op placeholder)               ?
-?                                                                             ?
-?  6. MSAA resolve                                                            ?
-?     ?? Framebuffer::unbind()                                                ?
-?     ?? Framebuffer::resolve()                                               ?
-?     ?   ?? glBlitFramebuffer(MSAA FBO ? resolve FBO)                      ?
-?     ?? glBlitFramebuffer(resolve FBO ? default back-buffer)               ?
-?                                                                             ?
-?  7. SDL_GL_SwapWindow()  ? present frame                                   ?
-???????????????????????????????????????????????????????????????????????????????
-```
+### Stage 1: Timer Update
+- **Timer::tick()** — Compute deltaTime (SDL_GetTicks delta / 1000)
+
+### Stage 2: Input Processing
+- **Input::update()** — SDL_PollEvent loop
+  - Track keyboard down/up/held states
+  - Update mouse position + delta
+  - Handle `SDL_EVENT_WINDOW_RESIZED` ? call `Renderer::onResize(w, h)` ? `Framebuffer::resize(w, h)`
+  - Detect Escape key ? set `running = false`
+  - Detect Tab key ? toggle SDL relative mouse mode
+
+### Stage 3: Camera Input (when mouse captured)
+- **Camera::ProcessInput()**
+  - W/S/A/D/E/Q ? `Camera::ProcessKeyboard()`
+  - Mouse delta ? `Camera::ProcessMouseMovement()`
+
+### Stage 4: Game Logic
+- Update scene state (e.g., rotate cube via `SceneObject::transform.setEuler()`)
+
+### Stage 5: Off-Screen Render Pass
+
+#### 5a. Framebuffer Setup
+- `Framebuffer::bind()` — Bind MSAA FBO, set viewport
+
+#### 5b. Frame Clear
+- `Renderer::beginFrame()` — `glClear(COLOR | DEPTH | STENCIL)`
+
+#### 5c. Scene Rendering
+- `Renderer::drawScene(scene, camera)`
+  - Compute `camera.GetViewMatrix()` ? `m_view`
+  - Compute `camera.GetProjectionMatrix()` ? `m_projection`
+  - Set `glStencilOp(KEEP, KEEP, REPLACE)`
+  - For each visible SceneObject with shader + geometry:
+    - `glStencilFunc(ALWAYS, 1, 0xFF)`
+    - `Renderer::pushUniforms()` — Bind:
+      - `uProjection, uView, uModel, uNormalMatrix`
+      - `uLightPos/Color/Constant/Linear/Quadratic`
+      - `uAmbientColor / uAmbientStrength`
+      - `uObjectColor / uSpecularColor / uShininess`
+      - `GL_TEXTURE_2D` for diffuse + specular
+    - `drawObject()` — Choose path:
+      - *Model path*: For each Mesh, call `Mesh::Draw(shader)` ? `glDrawElements(GL_TRIANGLES, ...)`
+      - *Single Mesh path*: `Mesh::Draw(shader)` ? `glDrawElements(GL_TRIANGLES, ...)`
+
+#### 5d. Grid Rendering
+- `Renderer::drawGrid(camera)`
+  - Bind `m_gridShader`, set uniforms: `gVP, gCameraWorldPos, gGridSize, gGridCellSize, gGridMinPixelsBetweenCells, gGridAlpha`
+  - `glDepthMask(GL_FALSE) + glEnable(GL_BLEND)`
+  - `glBindVertexArray(m_gridVAO)` ? `glDrawArrays(GL_TRIANGLES, 0, 6)` (vertex shader uses `gl_VertexID`)
+
+#### 5e. Selection Outline Rendering (Stencil-based)
+- `Renderer::drawSelected(scene, camera)`
+  - **Pass 1** — Write stencil buffer for selected objects:
+    - Use same `pushUniforms + drawObject` as drawScene
+    - Mark pixels with `stencil = 1`
+  - **Pass 2** — Draw outline around selected objects:
+    - `glStencilFunc(NOTEQUAL, 1, 0xFF)` — Only render where stencil ? 1
+    - `glDisable(GL_DEPTH_TEST)`
+    - Bind `m_outlineShader`, set uniforms: `uProjection, uView, uModel, uOutlineColor`
+    - Call `drawObject()` with scaled transform
+
+#### 5f. End Frame
+- `Renderer::endFrame()` — (Currently a no-op placeholder)
+
+### Stage 6: MSAA Resolve
+- `Framebuffer::unbind()`
+- `Framebuffer::resolve()`
+  - `glBlitFramebuffer(MSAA FBO ? resolve FBO)` — Downsample MSAA texture
+  - `glBlitFramebuffer(resolve FBO ? default back-buffer)` — Copy to screen
+
+### Stage 7: Present
+- `SDL_GL_SwapWindow()` — Display frame on screen
 
 ---
 
