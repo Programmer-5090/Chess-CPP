@@ -76,19 +76,35 @@ int main()
     Renderer renderer(800, 600, camera.Zoom);
     Framebuffer framebuffer(800, 600);
 
-    renderer.setLightPos({ 2.0f, 3.0f, 2.0f });
+    renderer.setLightPos({ 5.0f, 4.0f, 5.0f });
     renderer.setLightColor({ 1.0f, 1.0f, 1.0f });
 
-    renderer.setClearColor(1.0f, 1.0f, 1.0f);
+    renderer.setClearColor(0.0f, 0.0f, 0.0f);
 
     Scene scene;
     {
+        Mesh cubeMeshData = Cuboid(1.0f).toMesh();
+        std::shared_ptr<Shader> cubeShader = std::make_shared<Shader>("shaders/cube_instanced.vert", "shaders/cube.frag");
+        
+        std::vector<glm::mat4> transforms;
+        for (int x = 0; x < 3; ++x) {
+            for (int y = 0; y < 3; ++y) {
+                for (int z = 0; z < 3; ++z) {
+                    glm::mat4 transform = glm::mat4(1.0f);
+                    transform = glm::translate(transform, glm::vec3(-1.0f + x * 1.5f, 0.5f + y * 1.5f, -1.0f + z * 1.5f));
+                    transforms.push_back(transform);
+                }
+            }
+        }
+        
         SceneObject cubeObj;
-        cubeObj.name                 = "cube";
+        cubeObj.name = "instanced_cubes";
         cubeObj.material.objectColor = { 0.4f, 0.6f, 1.0f };
-        cubeObj.mesh   = std::make_shared<Mesh>(Cuboid(1.0f).toMesh());
-        cubeObj.shader = std::make_shared<Shader>("shaders/cube.vert", "shaders/cube.frag");
-        cubeObj.transform.translate(0.0f, 1.0f, 0.0f);
+        cubeObj.mesh = std::make_shared<Mesh>(std::move(cubeMeshData.vertices), 
+                                              std::move(cubeMeshData.indices), 
+                                              std::move(cubeMeshData.textures), 
+                                              transforms);
+        cubeObj.shader = cubeShader;
         scene.add(std::move(cubeObj));
     }
 
@@ -109,10 +125,11 @@ int main()
         if (mouseCaptured)
             camera.ProcessInput(input, deltaTime);
 
-        // Rotate the cube
+        // Rotate all cubes
         angle += 0.01f;
-        if (SceneObject* cube = scene.find("cube"))
-            cube->transform.setEuler(angle * 0.4f, angle, 0.0f);
+        if (SceneObject* cubeObj = scene.find("instanced_cubes")) {
+            cubeObj->transform.setEuler(angle * 0.4f, angle, 0.0f);
+        }
 
         // --- scene pass (off-screen) ---
         framebuffer.bind();
@@ -120,6 +137,7 @@ int main()
 
         renderer.drawGrid(camera);
         renderer.drawScene(scene, camera);
+        renderer.drawLightHelpers(camera);
         renderer.drawSelected(scene, camera);
 
         renderer.endFrame();

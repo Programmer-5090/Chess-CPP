@@ -1,4 +1,5 @@
-#pragma once
+#ifndef MESH_H
+#define MESH_H
 
 #include <vector>
 #include <string>
@@ -28,6 +29,11 @@ public:
     Mesh(std::vector<Vertex>       vertices,
          std::vector<unsigned int> indices,
          std::vector<Texture>      textures);
+    
+    Mesh(std::vector<Vertex>       vertices,
+         std::vector<unsigned int> indices,
+         std::vector<Texture>      textures,
+         const std::vector<glm::mat4>& transforms);
 
     // Move constructor — avoids copying large vertex/index buffers
     Mesh(Mesh&& other) noexcept;
@@ -40,11 +46,18 @@ public:
     ~Mesh();
 
     void Draw(Shader& shader);
+    void DrawInstances(Shader& shader);
 
-    unsigned int getVAO()        const { return VAO; }
-    unsigned int getIndexCount() const { return static_cast<unsigned int>(indices.size()); }
+    unsigned int getVAO()         const { return VAO; }
+    unsigned int getIndexCount()  const { return static_cast<unsigned int>(indices.size()); }
+    unsigned int getInstanceCount() const { return instanceCount; }
+    bool isInstanced() const { return instanceCount > 0; }
 
 private:
-    unsigned int VAO = 0, VBO = 0, EBO = 0;
+    unsigned int VAO = 0, VBO = 0, EBO = 0, instanceVBO = 0;
+    unsigned int instanceCount = 0;
     void setupMesh();
+    void setupMeshInstanced(const std::vector<glm::mat4>& transforms);
 };
+
+#endif

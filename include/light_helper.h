@@ -61,6 +61,8 @@ public:
         m_shader->setMat4("uView",       camera.GetViewMatrix());
         m_shader->setMat4("uProjection", projection);
 
+        glm::vec3 helperColor(1.0f, 0.647f, 0.0f); // Orange color for all helpers
+
         // Point lights: small sphere
         for (const auto& light : lights.points)
         {
@@ -68,7 +70,7 @@ public:
             glm::mat4 model = glm::translate(glm::mat4(1.0f), light.position);
             model           = glm::scale(model, glm::vec3(0.15f));
             m_shader->setMat4("uModel", model);
-            m_shader->setVec3("uColor", light.color);
+            m_shader->setVec3("uColor", helperColor);
             m_sphereMesh->Draw(*m_shader);
         }
 
@@ -90,7 +92,7 @@ public:
                 model = glm::rotate(model, glm::atan(sinA, cosA), glm::normalize(axis));
 
             m_shader->setMat4("uModel", model);
-            m_shader->setVec3("uColor", light.color);
+            m_shader->setVec3("uColor", helperColor);
             m_arrowMesh->Draw(*m_shader);
         }
 
