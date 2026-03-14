@@ -5,6 +5,7 @@ find_package(SDL3_shadercross REQUIRED CONFIG)
 find_package(glad REQUIRED CONFIG)
 find_package(glm REQUIRED CONFIG)
 find_package(assimp REQUIRED CONFIG)
+find_package(imgui CONFIG REQUIRED)
 
 # Collect all source files automatically
 file(GLOB_RECURSE CHESS_SOURCES
@@ -13,10 +14,7 @@ file(GLOB_RECURSE CHESS_SOURCES
     "${CMAKE_SOURCE_DIR}/geometry/*.cpp"
 )
 
-# Exclude files whose headers are not yet ready
-list(REMOVE_ITEM CHESS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/bounding_box.cpp")
-
-add_executable(ChessCPP ${CHESS_SOURCES})
+add_executable(ChessCPP ${CHESS_SOURCES} )
 
 set_property(TARGET ChessCPP PROPERTY CXX_STANDARD 20)
 
@@ -25,6 +23,7 @@ target_include_directories(ChessCPP PRIVATE
     "${CMAKE_SOURCE_DIR}/utils/include"
     "${CMAKE_SOURCE_DIR}/geometry/include"
     "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include"
+    "${CMAKE_SOURCE_DIR}/include/chess_engine"
 )
 
 target_link_libraries(ChessCPP PRIVATE
@@ -35,6 +34,7 @@ target_link_libraries(ChessCPP PRIVATE
     glad::glad
     glm::glm
     assimp::assimp
+    imgui::imgui
 )
 
 # Copy shaders folder next to the executable after every build

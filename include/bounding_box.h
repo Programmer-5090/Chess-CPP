@@ -14,7 +14,7 @@ public:
 
 private:
     GLuint VAO, VBO, EBO;
-    glm::mat4 modelMatrix;w
+    glm::mat4 modelMatrix;
 };
 
 #endif // BOUNDINGBOX_H

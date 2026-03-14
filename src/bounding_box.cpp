@@ -1,4 +1,4 @@
-#include "BoundingBox.h"
+#include "bounding_box.h"
 #include <vector>
 
 BoundingBox::BoundingBox(const glm::vec3& size) : VAO(0), VBO(0), EBO(0), modelMatrix(1.0f) {

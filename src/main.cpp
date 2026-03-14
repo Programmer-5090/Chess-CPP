@@ -1,6 +1,7 @@
 ﻿#include <SDL3/SDL.h>
 #include <glad/glad.h>
 #include <glm/glm.hpp>
+#include "gui.h"
 #include "shader.h"
 #include "mesh.h"
 #include "thread_pool.h"
@@ -71,6 +72,11 @@ int main()
     LOG_INFO_F("OpenGL %s", reinterpret_cast<const char*>(glGetString(GL_VERSION)));
 
     SDL_GL_SetSwapInterval(1);
+
+    // Initialize GUI
+    GUI gui;
+    gui.init(window, ctx);
+    ImGuiIO& io = gui.getIO();
 
     Camera   camera(glm::vec3(0.0f, 1.0f, 3.0f));
     Renderer renderer(800, 600, camera.Zoom);
@@ -151,6 +157,18 @@ int main()
                           0, 0, framebuffer.getWidth(), framebuffer.getHeight(),
                           GL_COLOR_BUFFER_BIT, GL_LINEAR);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        // --- ImGui frame ---
+        gui.beginFrame();
+
+        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+        ImGui::Begin("Debug Info");
+        ImGui::Text("FPS: %.1f", io.Framerate);
+        ImGui::Text("Delta Time: %.4f ms", deltaTime * 1000.0f);
+        ImGui::SliderFloat("Cube Rotation Speed", &angle, 0.0f, 0.1f);
+        ImGui::End();
+
+        gui.endFrame();
 
         SDL_GL_SwapWindow(window);
     }
