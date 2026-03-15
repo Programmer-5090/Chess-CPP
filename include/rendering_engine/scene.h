@@ -41,6 +41,8 @@ struct SceneObject {
 
     bool visible  { true };   // set false for captured pieces without removing them
     bool selected { false };  // drives stencil outline highlight
+    bool hasSelectedTransform { false };
+    glm::mat4 selectedTransform { 1.0f };
 };
 
 // Scene 

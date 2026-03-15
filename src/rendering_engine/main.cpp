@@ -14,20 +14,16 @@
 #include "scene.h"
 #include "logger.h"
 #include "cube.h"
+#include "gui/debug_ui_manager.h"
 
-static void processInputs(Input& input, bool& running, SDL_Window* window,
-                          Camera& camera, Renderer& renderer, Framebuffer& framebuffer, bool& mouseCaptured)
+static void processInputs(Input& input, bool& running, Renderer& renderer, Framebuffer& framebuffer, GUI& gui)
 {
     input.update();
-    if (input.shouldQuit() || input.keyDown("Escape"))
+    if (input.shouldQuit())
         running = false;
 
-    if (input.keyDown("Tab")) {
-        mouseCaptured = !mouseCaptured;
-        SDL_SetWindowRelativeMouseMode(window, mouseCaptured);
-    }
-
     for (const SDL_Event& e : input.getEvents()) {
+        gui.processEvent(e);
         if (e.type == SDL_EVENT_WINDOW_RESIZED) {
             renderer.onResize(e.window.data1, e.window.data2);
             framebuffer.resize(e.window.data1, e.window.data2);
@@ -76,11 +72,13 @@ int main()
     // Initialize GUI
     GUI gui;
     gui.init(window, ctx);
-    ImGuiIO& io = gui.getIO();
 
     Camera   camera(glm::vec3(0.0f, 1.0f, 3.0f));
     Renderer renderer(800, 600, camera.Zoom);
     Framebuffer framebuffer(800, 600);
+
+    DebugUIManager debugUI;
+    debugUI.init(window, camera);
 
     renderer.setLightPos({ 5.0f, 4.0f, 5.0f });
     renderer.setLightColor({ 1.0f, 1.0f, 1.0f });
@@ -116,7 +114,6 @@ int main()
 
     float angle         = 0.0f;
     bool  running       = true;
-    bool  mouseCaptured = true;
     Input input;
     Timer timer;
 
@@ -127,8 +124,9 @@ int main()
         timer.tick();
         float deltaTime = timer.deltaTime();
 
-        processInputs(input, running, window, camera, renderer, framebuffer, mouseCaptured);
-        if (mouseCaptured)
+        processInputs(input, running, renderer, framebuffer, gui);
+        debugUI.handleInput(input);
+        if (!debugUI.isActive())
             camera.ProcessInput(input, deltaTime);
 
         // Rotate all cubes
@@ -160,14 +158,7 @@ int main()
 
         // --- ImGui frame ---
         gui.beginFrame();
-
-        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Debug Info");
-        ImGui::Text("FPS: %.1f", io.Framerate);
-        ImGui::Text("Delta Time: %.4f ms", deltaTime * 1000.0f);
-        ImGui::SliderFloat("Cube Rotation Speed", &angle, 0.0f, 0.1f);
-        ImGui::End();
-
+        debugUI.draw(input, scene, deltaTime);
         gui.endFrame();
 
         SDL_GL_SwapWindow(window);

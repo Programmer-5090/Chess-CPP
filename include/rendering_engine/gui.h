@@ -19,7 +19,8 @@ public:
     
     void beginFrame();
     void endFrame();
-    
+    void processEvent(const SDL_Event& event);
+
     ImGuiIO& getIO() { return ImGui::GetIO(); }
     
 private:

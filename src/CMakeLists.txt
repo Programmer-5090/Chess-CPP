@@ -8,22 +8,25 @@ find_package(assimp REQUIRED CONFIG)
 find_package(imgui CONFIG REQUIRED)
 
 # Collect all source files automatically
-file(GLOB_RECURSE CHESS_SOURCES
+file(GLOB_RECURSE CHESS_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
     "${CMAKE_SOURCE_DIR}/utils/*.cpp"
     "${CMAKE_SOURCE_DIR}/geometry/*.cpp"
 )
 
-add_executable(ChessCPP ${CHESS_SOURCES} )
+add_executable(ChessCPP ${CHESS_SOURCES})
 
 set_property(TARGET ChessCPP PROPERTY CXX_STANDARD 20)
 
 target_include_directories(ChessCPP PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/include/chess_engine"
+    "${CMAKE_SOURCE_DIR}/include/rendering_engine"
+    "${CMAKE_SOURCE_DIR}/include/rendering_engine/gui"
     "${CMAKE_SOURCE_DIR}/utils/include"
     "${CMAKE_SOURCE_DIR}/geometry/include"
     "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include"
-    "${CMAKE_SOURCE_DIR}/include/chess_engine"
 )
 
 target_link_libraries(ChessCPP PRIVATE

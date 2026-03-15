@@ -53,3 +53,10 @@ void GUI::endFrame()
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
+
+void GUI::processEvent(const SDL_Event& event)
+{
+    if (!initialized) return;
+
+    ImGui_ImplSDL3_ProcessEvent(&event);
+}

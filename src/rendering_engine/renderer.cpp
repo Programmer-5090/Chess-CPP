@@ -205,24 +205,46 @@ void Renderer::drawSelected(Scene& scene, const Camera& camera,
             { anySelected = true; break; }
     if (!anySelected) return;
 
-    // Pass 1: write 1 into stencil for every selected fragment
+    // We must ensure the object's original depth is actually written to the depth buffer
+    // and stencil buffer before we draw the scaled outline. Because the normal draw pass
+    // already did this, there's no need to redraw Pass 1 with depth tests. We just need
+    // to clear the stencil buffer, write the selected object(s) into the stencil buffer 
+    // with depth testing enabled, and then draw the outline with depth testing disabled.
+
+    glClear(GL_STENCIL_BUFFER_BIT);
+
+    // Pass 1: write 1 into stencil for every selected fragment, ignoring depth so it 
+    // overlays everything, but we only want to outline the FRONT of the object.
+    // Actually, to make it completely overlay everything, we disable depth testing for the
+    // stencil pass too.
+    glDisable(GL_DEPTH_TEST);
     glStencilFunc(GL_ALWAYS, 1, 0xFF);
     glStencilMask(0xFF);
     glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    glDepthMask(GL_FALSE); // Don't modify depth buffer during stencil pass
+
+    m_outlineShader->use();
+    m_outlineShader->setMat4("uProjection",  m_projection);
+    m_outlineShader->setMat4("uView",        m_view);
 
     for (auto& obj : scene.objects())
     {
-        if (!obj.visible || !obj.selected || !obj.shader) continue;
+        if (!obj.visible || !obj.selected) continue;
         if (!obj.mesh && !obj.model) continue;
 
-        pushUniforms(*obj.shader, obj.transform.matrix(), camera.Position, obj.material);
-        drawObject(obj, *obj.shader);
+        glm::mat4 model = obj.hasSelectedTransform ? obj.selectedTransform : obj.transform.matrix();
+        m_outlineShader->setMat4("uModel", model);
+        if (obj.mesh && obj.mesh->isInstanced() && obj.hasSelectedTransform)
+            obj.mesh->Draw(*m_outlineShader);
+        else
+            drawObject(obj, *m_outlineShader);
     }
 
     // Pass 2: scaled-up mesh where stencil != 1 - visible border 
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glStencilFunc(GL_NOTEQUAL, 1, 0xFF);
     glStencilMask(0x00);
-    glDisable(GL_DEPTH_TEST);
 
     m_outlineShader->use();
     m_outlineShader->setMat4("uProjection",  m_projection);
@@ -234,18 +256,20 @@ void Renderer::drawSelected(Scene& scene, const Camera& camera,
         if (!obj.visible || !obj.selected) continue;
         if (!obj.mesh && !obj.model) continue;
 
-        // Scale around the object's local origin, then re-apply TRS
-        glm::mat4 scaled = glm::translate(glm::mat4(1.0f), obj.transform.position)
-                         * glm::toMat4(obj.transform.rotation)
-                         * glm::scale(glm::mat4(1.0f), obj.transform.scale * outlineScale);
+        glm::mat4 baseModel = obj.hasSelectedTransform ? obj.selectedTransform : obj.transform.matrix();
+        glm::mat4 scaled = baseModel * glm::scale(glm::mat4(1.0f), glm::vec3(outlineScale));
         m_outlineShader->setMat4("uModel", scaled);
-        drawObject(obj, *m_outlineShader);
+        if (obj.mesh && obj.mesh->isInstanced() && obj.hasSelectedTransform)
+            obj.mesh->Draw(*m_outlineShader);
+        else
+            drawObject(obj, *m_outlineShader);
     }
 
     // Restore GL state 
     glStencilMask(0xFF);
     glStencilFunc(GL_ALWAYS, 0, 0xFF);
     glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
 }
 
 // Infinite LOD grid

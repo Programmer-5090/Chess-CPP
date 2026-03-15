@@ -17,6 +17,7 @@ Mesh::Mesh(std::vector<Vertex>       vertices,
     : vertices(std::move(vertices))
     , indices(std::move(indices))
     , textures(std::move(textures))
+    , instanceTransforms(transforms)
 {
     setupMeshInstanced(transforms);
 }
@@ -29,6 +30,7 @@ Mesh::Mesh(Mesh&& other) noexcept
     , textures(std::move(other.textures))
     , VAO(other.VAO), VBO(other.VBO), EBO(other.EBO), instanceVBO(other.instanceVBO)
     , instanceCount(other.instanceCount)
+    , instanceTransforms(std::move(other.instanceTransforms))
 {
     other.VAO = other.VBO = other.EBO = other.instanceVBO = 0;
     other.instanceCount = 0;
@@ -49,6 +51,7 @@ Mesh& Mesh::operator=(Mesh&& other) noexcept
         textures = std::move(other.textures);
         VAO = other.VAO; VBO = other.VBO; EBO = other.EBO; instanceVBO = other.instanceVBO;
         instanceCount = other.instanceCount;
+        instanceTransforms = std::move(other.instanceTransforms);
         other.VAO = other.VBO = other.EBO = other.instanceVBO = 0;
         other.instanceCount = 0;
     }

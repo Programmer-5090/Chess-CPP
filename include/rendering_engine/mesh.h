@@ -52,10 +52,12 @@ public:
     unsigned int getIndexCount()  const { return static_cast<unsigned int>(indices.size()); }
     unsigned int getInstanceCount() const { return instanceCount; }
     bool isInstanced() const { return instanceCount > 0; }
+    const std::vector<glm::mat4>& getInstanceTransforms() const { return instanceTransforms; }
 
 private:
     unsigned int VAO = 0, VBO = 0, EBO = 0, instanceVBO = 0;
     unsigned int instanceCount = 0;
+    std::vector<glm::mat4> instanceTransforms;
     void setupMesh();
     void setupMeshInstanced(const std::vector<glm::mat4>& transforms);
 };
