@@ -12,6 +12,14 @@ struct Player
     int fromSquare;
     int toSquare;
 	bool isPieceSelected;
+    void reset()
+    {
+        color = -1;
+        pieceType = -1;
+        fromSquare = -1;
+        toSquare = -1;
+        isPieceSelected = false;
+    }
 };
 
 
@@ -20,8 +28,8 @@ class BoardState
  
     uint64_t pieceBoards[12];
 	uint64_t whitePieces;
-    uint64_t black_pieces;
-    uint64_t main_board;
+    uint64_t blackPieces;
+    uint64_t mainBoard;
     int[64] mail_box;
     Player player;
 
@@ -55,7 +63,7 @@ class BoardState
 				                    pieceBoards[chess::COLOR_BLACK * 6 + chess::PIECE_KNIGHT] | pieceBoards[chess::COLOR_BLACK * 6 + chess::PIECE_BISHOP] |
 				                    pieceBoards[chess::COLOR_BLACK * 6 + chess::PIECE_QUEEN] | pieceBoards[chess::COLOR_BLACK * 6 + chess::PIECE_KING];
 			
-            main_board = white_pieces | black_pieces;
+            mainBoard = white_pieces | black_pieces;
 
             //initializing mailbox for quick piece type lookup
             for (int color = 0; color < 2; color++) {
@@ -71,11 +79,11 @@ class BoardState
 
 
         }
-        void selectPiece(int x, int y)
+        void select(int x, int y)
         {
             int index = y * 8 + x;
 
-            if (!(main_board & (1ULL << (index))))
+            if ((mainBoard & (1ULL << (index))))
             {
 
                 if (whitePieces & (1ULL << (index)))
@@ -84,32 +92,39 @@ class BoardState
                 else
                     player.color = chess::COLOR_BLACK;
 
-                switch (mail_box[index])
-                {
-                case chess::PIECE_PAWN:
-                    player.pieceType = chess::PIECE_PAWN;
-                    break;
-                case chess::PIECE_KNIGHT:
-                    player.pieceType = chess::PIECE_KNIGHT;
-                    break;
-                case chess::PIECE_BISHOP:
-                    player.pieceType = chess::PIECE_BISHOP;
-                    break;
-                case chess::PIECE_ROOK:
-                    player.pieceType = chess::PIECE_ROOK;
-                    break;
-                case chess::PIECE_QUEEN:
-                    player.pieceType = chess::PIECE_QUEEN;
-                    break;
-                case chess::PIECE_KING:
-                    player.pieceType = chess::PIECE_KING;
-                    break;
-                }
+
+				player.pieceType = mailbox[index];
 
 				player.fromSquare = index;
 
+				player.isPieceSelected = true;
             }
+            else if(player.isPieceSelected)
+            {
+                move(x, y);
+			}
         }
+
+
+        void move(int x, int y)
+        {
+            if (player.isPieceSelected)
+            {
+
+				//Not handling move legality here, just updating the board state
+                player.toSquare = y * 8 + x;
+                
+				pieceBoards[player.color * 6 + player.pieceType] ^= (1ULL << player.fromSquare);
+				pieceBoards[player.color * 6 + player.pieceType] |= (1ULL << player.toSquare);
+
+                mailbox[player.fromSquare] = -1;
+				mailbox[player.toSquare] = player.pieceType;
+
+				player.reset();
+            }
+		}
+       
+
 
 };
 
