@@ -141,6 +141,7 @@ int main()
 
         renderer.drawGrid(camera);
         renderer.drawScene(scene, camera);
+        // renderer.drawScene2D(scene);
         renderer.drawLightHelpers(camera);
         renderer.drawSelected(scene, camera);
 

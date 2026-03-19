@@ -13,7 +13,7 @@ class Renderer
 {
 public:
     Renderer(int width, int height, float fovDegrees = 45.0f);
-    ~Renderer() { glDeleteVertexArrays(1, &m_gridVAO); }
+    ~Renderer();
 
     void beginFrame();
     void endFrame();
@@ -42,6 +42,9 @@ public:
     // Draw every visible SceneObject with a single forced shader (shadow/pick pass)
     // Material uniforms are NOT pushed — caller sets what it needs before the call
     void drawScene(Scene& scene, const Camera& camera, Shader& overrideShader) const;
+
+    // Draw all visible 2D sprites from Scene in screen space (top-left origin)
+    void drawScene2D(Scene& scene) const;
 
     // Draw stencil outlines for every selected SceneObject (call after drawScene)
     void drawSelected(Scene& scene, const Camera& camera,
@@ -78,6 +81,12 @@ private:
     // Infinite LOD grid shader + its VAO (no VBO needed — VS uses gl_VertexID)
     std::unique_ptr<Shader> m_gridShader;
     GLuint                  m_gridVAO = 0;
+
+    // 2D sprite pipeline
+    std::unique_ptr<Shader> m_spriteShader;
+    GLuint                  m_spriteVAO = 0;
+    GLuint                  m_spriteVBO = 0;
+    GLuint                  m_spriteEBO = 0;
 
     void updateProjection(const Camera* cam = nullptr);
 

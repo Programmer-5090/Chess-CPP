@@ -22,6 +22,7 @@ set_property(TARGET ChessCPP PROPERTY CXX_STANDARD 20)
 target_include_directories(ChessCPP PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
     "${CMAKE_SOURCE_DIR}/include/chess_engine"
+    "${CMAKE_SOURCE_DIR}/include/chess2D"
     "${CMAKE_SOURCE_DIR}/include/rendering_engine"
     "${CMAKE_SOURCE_DIR}/include/rendering_engine/gui"
     "${CMAKE_SOURCE_DIR}/utils/include"

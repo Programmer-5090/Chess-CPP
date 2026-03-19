@@ -6,7 +6,9 @@
 #include "mesh.h"
 #include "shader.h"
 #include "transform.h"
+#include "glm/vec2.hpp"
 #include "glm/vec3.hpp"
+#include "glm/vec4.hpp"
 
 // Forward declaration — avoids pulling all of model.h into every TU that includes scene.h
 class Model;
@@ -45,6 +47,21 @@ struct SceneObject {
     glm::mat4 selectedTransform { 1.0f };
 };
 
+struct Sprite2D {
+    std::string name;
+
+    glm::vec2 position { 0.0f, 0.0f }; // Pixel-space position (top-left origin)
+    glm::vec2 size     { 64.0f, 64.0f };
+    float     rotationDegrees { 0.0f };
+    float     layer    { 0.0f }; // Smaller first, larger rendered on top
+
+    glm::vec4 color    { 1.0f, 1.0f, 1.0f, 1.0f };
+    unsigned int texture { 0 };
+
+    std::shared_ptr<Shader> shader;
+    bool visible { true };
+};
+
 // Scene 
 class Scene {
 public:
@@ -52,9 +69,17 @@ public:
     SceneObject* find(const std::string& name);
     void remove(const std::string& name);
 
+    Sprite2D* addSprite(Sprite2D sprite);
+    Sprite2D* findSprite(const std::string& name);
+    void removeSprite(const std::string& name);
+
     const std::vector<SceneObject>& objects() const { return m_objects; }
           std::vector<SceneObject>& objects()       { return m_objects; }
 
+    const std::vector<Sprite2D>& sprites() const { return m_sprites; }
+          std::vector<Sprite2D>& sprites()       { return m_sprites; }
+
 private:
     std::vector<SceneObject> m_objects;
+    std::vector<Sprite2D>    m_sprites;
 };

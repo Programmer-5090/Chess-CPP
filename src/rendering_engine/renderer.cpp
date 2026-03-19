@@ -1,5 +1,7 @@
 #include "renderer.h"
 #include "model.h"
+#include <algorithm>
+#include <vector>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp> // For glm::toMat4
 
@@ -18,7 +20,49 @@ Renderer::Renderer(int width, int height, float fovDegrees)
     m_cameraHelper.init();
     m_outlineShader = std::make_unique<Shader>("shaders/outline.vert",      "shaders/outline.frag");
     m_gridShader    = std::make_unique<Shader>("shaders/infinite_grid.vert",   "shaders/infinite_grid.frag");
+    m_spriteShader  = std::make_unique<Shader>("shaders/sprite2d.vert", "shaders/sprite2d.frag");
+
     glGenVertexArrays(1, &m_gridVAO);
+
+    const float quadVertices[] = {
+        // pos      // uv
+        0.0f, 0.0f, 0.0f, 0.0f,
+        1.0f, 0.0f, 1.0f, 0.0f,
+        1.0f, 1.0f, 1.0f, 1.0f,
+        0.0f, 1.0f, 0.0f, 1.0f
+    };
+
+    const unsigned int quadIndices[] = {
+        0, 1, 2,
+        2, 3, 0
+    };
+
+    glGenVertexArrays(1, &m_spriteVAO);
+    glGenBuffers(1, &m_spriteVBO);
+    glGenBuffers(1, &m_spriteEBO);
+
+    glBindVertexArray(m_spriteVAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, m_spriteVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_spriteEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(quadIndices), quadIndices, GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), reinterpret_cast<void*>(0));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), reinterpret_cast<void*>(2 * sizeof(float)));
+
+    glBindVertexArray(0);
+}
+
+Renderer::~Renderer()
+{
+    glDeleteVertexArrays(1, &m_gridVAO);
+    glDeleteVertexArrays(1, &m_spriteVAO);
+    glDeleteBuffers(1, &m_spriteVBO);
+    glDeleteBuffers(1, &m_spriteEBO);
 }
 
 // Frame control
@@ -187,6 +231,81 @@ void Renderer::drawScene(Scene& scene, const Camera& camera, Shader& overrideSha
         overrideShader.setMat4("uModel", obj.transform.matrix());
         drawObject(obj, overrideShader);
     }
+}
+
+void Renderer::drawScene2D(Scene& scene) const
+{
+    if (!m_spriteShader || m_spriteVAO == 0) return;
+
+    std::vector<const Sprite2D*> sortedSprites;
+    sortedSprites.reserve(scene.sprites().size());
+
+    for (const auto& sprite : scene.sprites())
+    {
+        if (!sprite.visible) continue;
+        sortedSprites.push_back(&sprite);
+    }
+
+    if (sortedSprites.empty()) return;
+
+    std::stable_sort(sortedSprites.begin(), sortedSprites.end(),
+        [](const Sprite2D* a, const Sprite2D* b)
+        {
+            return a->layer < b->layer;
+        });
+
+    const GLboolean depthWasEnabled = glIsEnabled(GL_DEPTH_TEST);
+    const GLboolean blendWasEnabled = glIsEnabled(GL_BLEND);
+
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    const glm::mat4 ortho = glm::ortho(0.0f, static_cast<float>(m_width),
+                                       static_cast<float>(m_height), 0.0f,
+                                       -1.0f, 1.0f);
+
+    glBindVertexArray(m_spriteVAO);
+
+    for (const Sprite2D* sprite : sortedSprites)
+    {
+        Shader* shader = sprite->shader ? sprite->shader.get() : m_spriteShader.get();
+
+        glm::mat4 model(1.0f);
+        model = glm::translate(model, glm::vec3(sprite->position, 0.0f));
+        model = glm::translate(model, glm::vec3(0.5f * sprite->size.x, 0.5f * sprite->size.y, 0.0f));
+        model = glm::rotate(model, glm::radians(sprite->rotationDegrees), glm::vec3(0.0f, 0.0f, 1.0f));
+        model = glm::translate(model, glm::vec3(-0.5f * sprite->size.x, -0.5f * sprite->size.y, 0.0f));
+        model = glm::scale(model, glm::vec3(sprite->size, 1.0f));
+
+        shader->use();
+        shader->setMat4("uProjection", ortho);
+        shader->setMat4("uModel", model);
+        shader->setVec4("uColor", sprite->color);
+
+        const bool hasTexture = sprite->texture != 0;
+        shader->setBool("uUseTexture", hasTexture);
+
+        if (hasTexture)
+        {
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, sprite->texture);
+            shader->setInt("uTexture", 0);
+        }
+
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
+    }
+
+    glBindVertexArray(0);
+
+    glDepthMask(GL_TRUE);
+    if (depthWasEnabled) glEnable(GL_DEPTH_TEST);
+    else                 glDisable(GL_DEPTH_TEST);
+
+    if (blendWasEnabled) glEnable(GL_BLEND);
+    else                 glDisable(GL_BLEND);
 }
 
 // Selection outline (stencil two-pass) 
