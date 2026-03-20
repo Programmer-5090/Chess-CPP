@@ -4,9 +4,7 @@
 #include <cstdint>
 #include <algorithm>
 
-namespace chess {
-
-
+namespace Chess {
     // Piece type constants (occupies bits 0-2)
     // Values are chosen such that sliding piece types have bit 2 set (BISHOP=5, ROOK=6, QUEEN=7)
     constexpr int PIECE_KING = 0;
@@ -19,11 +17,7 @@ namespace chess {
     // Color constants (occupies bits 3-4)
     // WHITE = 0b01000 (bit 3), BLACK = 0b10000 (bit 4)
     constexpr int COLOR_BLACK = 0;
-    constexpr int COLOR_WHITE = 1;
-        
-    
-
-    
+    constexpr int COLOR_WHITE = 1; 
 }
 #endif 
 
