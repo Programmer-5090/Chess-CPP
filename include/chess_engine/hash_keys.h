@@ -34,66 +34,28 @@ namespace Chess {
         bool initialized = false;
 
         // Generate a pseudo-random 64-bit number
-        static uint64_t random64() {
-            return (static_cast<uint64_t>(std::rand()) << 48) ^
-                   (static_cast<uint64_t>(std::rand()) << 32) ^
-                   (static_cast<uint64_t>(std::rand()) << 16) ^
-                   (static_cast<uint64_t>(std::rand()));
-        }
+        static uint64_t random64();
 
     public:
         ZobristKeys() = default;
 
         // Initialize all hash keys with random values
-        void init() {
-            static bool seeded = false;
-            if (!seeded) {
-                std::srand(static_cast<unsigned>(std::random_device{}()));
-                seeded = true;
-            }
-
-            // Generate random keys for each piece on each square
-            for (int i = 0; i < 13; ++i) {
-                for (int j = 0; j < BOARD_SIZE; ++j) {
-                    pieceKeys[i][j] = random64();
-                }
-            }
-
-            // Generate key for side-to-move
-            sideKey = random64();
-
-            // Generate keys for each castling rights combination (16 possible)
-            for (int i = 0; i < 16; ++i) {
-                castleKeys[i] = random64();
-            }
-
-            initialized = true;
-        }
+        void init();
 
         // Check if keys have been initialized
-        bool isInitialized() const {
-            return initialized;
-        }
+        bool isInitialized() const;
 
         // Get piece key for a specific piece and square
-        uint64_t getPieceKey(int pieceIndex, int square) const {
-            return pieceKeys[pieceIndex][square];
-        }
+        uint64_t getPieceKey(int pieceIndex, int square) const;
 
         // Get side-to-move key
-        uint64_t getSideKey() const {
-            return sideKey;
-        }
+        uint64_t getSideKey() const;
 
         // Get castling rights key
-        uint64_t getCastleKey(int rights) const {
-            return castleKeys[rights];
-        }
+        uint64_t getCastleKey(int rights) const;
 
         // Get piece key array for external access
-        const std::array<std::array<uint64_t, BOARD_SIZE>, 13>& getPieceKeys() const {
-            return pieceKeys;
-        }
+        const std::array<std::array<uint64_t, BOARD_SIZE>, 13>& getPieceKeys() const;
     };
 
     // Global Zobrist keys instance (can be made thread-local if needed)

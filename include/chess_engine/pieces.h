@@ -13,6 +13,7 @@ namespace Chess {
     constexpr int PIECE_BISHOP = 3;    // bit pattern: 0b101
     constexpr int PIECE_ROOK = 4;      // bit pattern: 0b110
     constexpr int PIECE_QUEEN = 5;     // bit pattern: 0b111
+    constexpr int PIECE_NONE = 6;
 
     // Color constants (occupies bits 3-4)
     // WHITE = 0b01000 (bit 3), BLACK = 0b10000 (bit 4)

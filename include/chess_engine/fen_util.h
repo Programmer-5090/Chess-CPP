@@ -2,7 +2,7 @@
 #define FEN_UTIL_H
 
 #include "pieces.h"
-#include "bitboard.h"
+#include "bitboard_util.h"
 #include "board_rep.h"
 #include "board_state.h"
 
@@ -23,7 +23,13 @@ inline void loadFEN(BoardState& board, const std::string& fen) {
     ss >> position >> turn >> castling >> enPassant >> halfmove >> fullmove;
 
     auto& pieceBoards = board.getPieceBoards();
-    pieceBoards.fill(0);
+    
+    // Clear all piece boards
+    for (int c = 0; c < 2; ++c) {
+        for (int t = 0; t < 6; ++t) {
+            pieceBoards[c][t] = 0;
+        }
+    }
 
     // FEN format: rank 8 (a8-h8) down to rank 1 (a1-h1)
     int rank = 7, file = 0;
@@ -50,7 +56,7 @@ inline void loadFEN(BoardState& board, const std::string& fen) {
 
             if (pieceType != -1) {
                 uint64_t sqMask = (1ULL << sq);
-                pieceBoards[color * 6 + pieceType] |= sqMask;
+                pieceBoards[color][pieceType] |= sqMask;
             }
 
             file++;
@@ -102,7 +108,7 @@ inline std::string toFEN(const BoardState& board) {
             // Find which piece is on this square
             for (int c = 0; c < 2; ++c) {
                 for (int t = 0; t < 6; ++t) {
-                    if (pieceBoards[c * 6 + t] & sqMask) {
+                    if (pieceBoards[c][t] & sqMask) {
                         color = c;
                         pieceType = t;
                         break;

@@ -158,4 +158,4 @@ public:
     size_t getPendingTaskCount() const { return taskQueue.taskCount.load(); }
 };
 
-#endif // THREAD_POOL_H#endif // THREAD_POOL_H
+#endif // THREAD_POOL_H

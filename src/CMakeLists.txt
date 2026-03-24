@@ -11,11 +11,18 @@ find_package(imgui CONFIG REQUIRED)
 file(GLOB_RECURSE CHESS_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/chess_engine/*.cpp"
     "${CMAKE_SOURCE_DIR}/utils/*.cpp"
     "${CMAKE_SOURCE_DIR}/geometry/*.cpp"
 )
 
+# Exclude internal/test mains that would introduce duplicate `main` symbols
+list(REMOVE_ITEM CHESS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/chess_engine/main.cpp")
+
 add_executable(ChessCPP ${CHESS_SOURCES})
+
+# Enable link-time optimization (LTO) / interprocedural optimization where supported
+set_property(TARGET ChessCPP PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 
 set_property(TARGET ChessCPP PROPERTY CXX_STANDARD 20)
 

@@ -66,7 +66,7 @@ namespace Chess {
 
         // Extract the move flag
         int flag() const {
-            return moveValue >> 12;
+            return (moveValue & FLAG_MASK) >> 12;
         }
 
         // Check if this move is a promotion

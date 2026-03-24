@@ -22,45 +22,27 @@ namespace Chess {
         PieceList() = default;
 
         // Get the number of pieces in this list
-        int count() const {
-            return static_cast<int>(squares.size());
-        }
+        int count() const;
 
         // Add a piece at the given square
-        void add(int square) {
-            squares.push_back(square);
-        }
+        void add(int square);
 
         // Remove a piece from the given square
-        void remove(int square) {
-            auto it = std::find(squares.begin(), squares.end(), square);
-            if (it != squares.end()) {
-                squares.erase(it);
-            }
-        }
+        void remove(int square);
 
         // Move a piece from one square to another
-        void move(int fromSquare, int toSquare) {
-            auto it = std::find(squares.begin(), squares.end(), fromSquare);
-            if (it != squares.end()) {
-                *it = toSquare;
-            }
-        }
+        void move(int fromSquare, int toSquare);
+        
+        bool contains(int square) const;
 
         // Clear all pieces from this list
-        void clear() {
-            squares.clear();
-        }
+        void clear();
 
         // Get the underlying vector (for iteration)
-        const std::vector<int>& getSquares() const {
-            return squares;
-        }
+        const std::vector<int>& getSquares() const;
 
         // Direct access to squares by index
-        int operator[](int index) const {
-            return squares[index];
-        }
+        int operator[](int index) const;
     };
 
 }  // namespace Chess

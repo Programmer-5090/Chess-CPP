@@ -138,17 +138,17 @@ namespace Chess
             return ((fileIndex + rankIndex) % 2) != 0;
         }
 
-        static std::string SquareNameFromCoordinate(int fileIndex, int rankIndex)
+        static inline std::string SquareNameFromCoordinate(int fileIndex, int rankIndex)
         {
             return std::string(1, fileNames[static_cast<std::size_t>(fileIndex)]) + std::to_string(rankIndex + 1);
         }
 
-        static std::string SquareNameFromCoordinate(const Coord& coord)
+        static inline std::string SquareNameFromCoordinate(const Coord& coord)
         {
             return SquareNameFromCoordinate(coord.fileIndex, coord.rankIndex);
         }
 
-        static std::string SquareNameFromIndex(int squareIndex)
+        static inline std::string SquareNameFromIndex(int squareIndex)
         {
             return SquareNameFromCoordinate(CoordFromIndex(squareIndex));
         }

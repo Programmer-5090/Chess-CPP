@@ -49,7 +49,7 @@ void printBoard(const BoardState& board) {
             // Find which piece is on this square by checking all bitboards
             for (int c = 0; c < 2; ++c) {
                 for (int t = 0; t < 6; ++t) {
-                    if (pieceBoards[c * 6 + t] & sqMask) {
+                    if (pieceBoards[c][t] & sqMask) {
                         color = c;
                         pieceType = t;
                         break;
@@ -95,7 +95,7 @@ void printBoardInfo(const BoardState& board) {
 }
 
 
-// g++ -std=c++20 -I./include -o tests/chess_board_test include/chess_engine/main.cpp
+// g++ -std=c++20 -I./include/chess_engine src/chess_engine/*.cpp tests/chess_engine_test.cpp -o tests/chess_board_test
 int main() {
     std::cout << "=== Chess Engine Board Test ===\n";
     
