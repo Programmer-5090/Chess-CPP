@@ -1,0 +1,175 @@
+#include <SDL3/SDL.h>
+#include <glad/glad.h>
+#include <glm/glm.hpp>
+#include "gui.h"
+#include "shader.h"
+#include "mesh.h"
+#include "thread_pool.h"
+#include "input.h"
+#include "camera.h"
+#include "renderer.h"
+#include "framebuffer.h"
+#include "texture_cache.h"
+#include "timer.h"
+#include "scene.h"
+#include "logger.h"
+#include "cube.h"
+#include "gui/debug_ui_manager.h"
+
+static void processInputs(Input& input, bool& running, Renderer& renderer, Framebuffer& framebuffer, GUI& gui)
+{
+    input.update();
+    if (input.shouldQuit())
+        running = false;
+
+    for (const SDL_Event& e : input.getEvents()) {
+        gui.processEvent(e);
+        if (e.type == SDL_EVENT_WINDOW_RESIZED) {
+            renderer.onResize(e.window.data1, e.window.data2);
+            framebuffer.resize(e.window.data1, e.window.data2);
+        }
+    }
+}
+
+int main()
+{
+    Logger::init("logs", LogLevel::INFO, false);
+
+    ThreadPool pool;
+    LOG_INFO_F("ThreadPool started with %zd threads", pool.getThreadCount());
+
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        LOG_ERROR_F("SDL_Init failed: %s", SDL_GetError());
+        return 1;
+    }
+
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+
+    SDL_Window* window = SDL_CreateWindow("Chess CPP", 800, 600,
+        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+    if (!window) {
+        LOG_ERROR_F("SDL_CreateWindow failed: %s", SDL_GetError());
+        SDL_Quit(); return 1;
+    }
+
+    SDL_GLContext ctx = SDL_GL_CreateContext(window);
+    if (!ctx) {
+        LOG_ERROR_F("SDL_GL_CreateContext failed: %s", SDL_GetError());
+        SDL_DestroyWindow(window); SDL_Quit(); return 1;
+    }
+
+    if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
+        LOG_ERROR("Failed to initialize glad");
+        return 1;
+    }
+
+    LOG_INFO_F("OpenGL %s", reinterpret_cast<const char*>(glGetString(GL_VERSION)));
+
+    SDL_GL_SetSwapInterval(1);
+
+    // Initialize GUI
+    GUI gui;
+    gui.init(window, ctx);
+
+    Camera   camera(glm::vec3(0.0f, 1.0f, 3.0f));
+    Renderer renderer(800, 600, camera.Zoom);
+    Framebuffer framebuffer(800, 600);
+
+    DebugUIManager debugUI;
+    debugUI.init(window, camera);
+
+    renderer.setLightPos({ 5.0f, 4.0f, 5.0f });
+    renderer.setLightColor({ 1.0f, 1.0f, 1.0f });
+
+    renderer.setClearColor(0.0f, 0.0f, 0.0f);
+
+    Scene scene;
+    {
+        Mesh cubeMeshData = Cuboid(1.0f).toMesh();
+        std::shared_ptr<Shader> cubeShader = std::make_shared<Shader>("shaders/cube_instanced.vert", "shaders/cube.frag");
+
+        std::vector<glm::mat4> transforms;
+        for (int x = 0; x < 3; ++x) {
+            for (int y = 0; y < 3; ++y) {
+                for (int z = 0; z < 3; ++z) {
+                    glm::mat4 transform = glm::mat4(1.0f);
+                    transform = glm::translate(transform, glm::vec3(-1.0f + x * 1.5f, 0.5f + y * 1.5f, -1.0f + z * 1.5f));
+                    transforms.push_back(transform);
+                }
+            }
+        }
+
+        SceneObject cubeObj;
+        cubeObj.name = "instanced_cubes";
+        cubeObj.material.objectColor = { 0.4f, 0.6f, 1.0f };
+        cubeObj.mesh = std::make_shared<Mesh>(std::move(cubeMeshData.vertices),
+            std::move(cubeMeshData.indices),
+            std::move(cubeMeshData.textures),
+            transforms);
+        cubeObj.shader = cubeShader;
+        scene.add(std::move(cubeObj));
+    }
+
+    float angle = 0.0f;
+    bool  running = true;
+    Input input;
+    Timer timer;
+
+    SDL_SetWindowRelativeMouseMode(window, true);
+
+    while (running)
+    {
+        timer.tick();
+        float deltaTime = timer.deltaTime();
+
+        processInputs(input, running, renderer, framebuffer, gui);
+        debugUI.handleInput(input);
+        if (!debugUI.isActive())
+            camera.ProcessInput(input, deltaTime);
+
+        // Rotate all cubes
+        angle += 0.01f;
+        if (SceneObject* cubeObj = scene.find("instanced_cubes")) {
+            cubeObj->transform.setEuler(angle * 0.4f, angle, 0.0f);
+        }
+
+        // --- scene pass (off-screen) ---
+        framebuffer.bind();
+        renderer.beginFrame();
+
+        renderer.drawGrid(camera);
+        renderer.drawScene(scene, camera);
+        // renderer.drawScene2D(scene);
+        renderer.drawLightHelpers(camera);
+        renderer.drawSelected(scene, camera);
+
+        renderer.endFrame();
+        framebuffer.unbind();
+
+        // Resolve MSAA ? sampleable texture, then blit to default back-buffer
+        framebuffer.resolve();
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer.getResolveFBO());
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        glBlitFramebuffer(0, 0, framebuffer.getWidth(), framebuffer.getHeight(),
+            0, 0, framebuffer.getWidth(), framebuffer.getHeight(),
+            GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        // --- ImGui frame ---
+        gui.beginFrame();
+        debugUI.draw(input, scene, deltaTime);
+        gui.endFrame();
+
+        SDL_GL_SwapWindow(window);
+    }
+
+    TextureCache::get().clear();
+    Logger::shutdown();
+
+    SDL_GL_DestroyContext(ctx);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+    return 0;
+}
