@@ -13,7 +13,7 @@
 
 namespace Chess {
 
-inline void loadFEN(BoardState& board, const std::string& fen) {
+inline void loadFENUtil(BoardState& board, const std::string& fen) {
     board.init();
 
     std::istringstream ss(fen);
@@ -91,7 +91,7 @@ inline void loadFEN(BoardState& board, const std::string& fen) {
     board.setPosKey(board.generatePosKey());
 }
 
-inline std::string toFEN(const BoardState& board) {
+inline std::string toFENUtil(const BoardState& board) {
     std::ostringstream ss;
 
     const auto& pieceBoards = board.getPieceBoards();

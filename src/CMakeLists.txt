@@ -16,8 +16,13 @@ file(GLOB_RECURSE CHESS_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/geometry/*.cpp"
 )
 
-# Exclude internal/test mains that would introduce duplicate `main` symbols
-list(REMOVE_ITEM CHESS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/chess_engine/main.cpp")
+# Remove any sources from the chess2D folder to avoid duplicate 'main' when building the core target
+foreach(_src ${CHESS_SOURCES})
+    string(FIND "${_src}" "${CMAKE_CURRENT_SOURCE_DIR}/chess2D/" _pos)
+    if(NOT _pos EQUAL -1)
+        list(REMOVE_ITEM CHESS_SOURCES "${_src}")
+    endif()
+endforeach()
 
 add_executable(ChessCPP ${CHESS_SOURCES})
 
@@ -54,5 +59,41 @@ add_custom_command(TARGET ChessCPP POST_BUILD
         "${CMAKE_SOURCE_DIR}/shaders"
         "$<TARGET_FILE_DIR:ChessCPP>/shaders"
 )
+
+# Optional separate executable that builds the 2D chess UI main only
+option(BUILD_CHESS2D "Build the Chess2D executable (uses src/chess2D main)" ON)
+if(BUILD_CHESS2D)
+    file(GLOB_RECURSE CHESS2D_SOURCES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/chess2D/*.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/chess_engine/*.cpp"
+        "${CMAKE_SOURCE_DIR}/utils/*.cpp"
+
+    )
+
+    add_executable(Chess2D ${CHESS2D_SOURCES})
+    set_property(TARGET Chess2D PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    set_property(TARGET Chess2D PROPERTY CXX_STANDARD 20)
+
+    target_include_directories(Chess2D PRIVATE
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/include/chess_engine"
+        "${CMAKE_SOURCE_DIR}/include/chess2D"
+        "${CMAKE_SOURCE_DIR}/include/rendering_engine"
+        "${CMAKE_SOURCE_DIR}/utils/include"
+        "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include"
+    )
+
+    target_link_libraries(Chess2D PRIVATE
+        SDL3::SDL3
+        SDL3_image::SDL3_image
+        SDL3_ttf::SDL3_ttf
+    )
+
+    add_custom_command(TARGET Chess2D POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/resources"
+            "$<TARGET_FILE_DIR:Chess2D>/resources"
+    )
+endif()
 
 # TODO: Add tests and install targets if needed.

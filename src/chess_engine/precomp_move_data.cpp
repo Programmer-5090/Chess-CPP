@@ -340,5 +340,4 @@ namespace Chess {
 
 		initialized = true;
 	}
-
 } // namespace Chess

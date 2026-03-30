@@ -69,6 +69,8 @@ public:
      */
     void generateLegalMovesConstrained(const BoardState& board, bool genQuiet);
 
+    std::vector<Move> getPieceMoves(int square, const BoardState* boardState);
+
     /**
      * Add a move to the move list (with bounds checking)
      */
@@ -83,6 +85,9 @@ public:
      * @return Number of legal moves generated
      */
     int getLegalMoveCount() const;
+
+    // Query whether the side to move is in check (valid after generateLegalMoves)
+    bool getInCheck() const;
 
 
 private:

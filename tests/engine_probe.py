@@ -25,6 +25,7 @@ HARNESS_CPP = r'''
 #include "chess_engine/fen_util.h"
 #include "chess_engine/board_rep.h"
 #include "thread_pool.h"
+#include "logger.h"
 
 using namespace Chess;
 
@@ -197,6 +198,9 @@ int main(int argc, char** argv) {
 
     MoveGenerator gen;
     gen.init();
+
+    // Ensure project-wide logger does not redirect std::cout/cerr for the probe
+    Logger::setSilent(true);
 
     if (mode == "moves") {
         gen.generateLegalMoves(board, true);

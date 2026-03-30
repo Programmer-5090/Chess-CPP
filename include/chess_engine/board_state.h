@@ -27,9 +27,8 @@ namespace Chess {
     // Forward declaration for FEN loading function
     // Defined in fen_util.h
     class BoardState;
-    // rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
-    // rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1
-    void loadFEN(BoardState& board, const std::string& fen);
+    
+    
 
     class BoardState {
     private:
@@ -243,6 +242,7 @@ namespace Chess {
         uint64_t getOccupancy(int color) const { return (color == COLOR_WHITE) ? whitePieces : blackPieces; }
 
         std::string getFEN() const;
+        void loadFEN(const std::string& fen);
 
         int getSide() const { return side; }
         void setSide(int s) { side = s; }

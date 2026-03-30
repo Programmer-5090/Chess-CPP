@@ -56,7 +56,7 @@ namespace Chess {
         if (fen.empty()) {
             reset();
         } else {
-            loadFEN(*this, fen);
+            loadFEN(fen);
         }
     }
 
@@ -480,5 +480,13 @@ namespace Chess {
         }
 
         return true;
+    }
+
+    void BoardState::loadFEN(const std::string& fen) {
+        loadFENUtil(*this, fen);
+    }
+
+    std::string BoardState::getFEN() const {
+        return toFENUtil(*this);
     }
 }  // namespace Chess

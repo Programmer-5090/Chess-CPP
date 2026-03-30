@@ -59,6 +59,203 @@ namespace Chess {
         return moveCount;
     }
 
+    std::vector<Move> MoveGenerator::getPieceMoves(int square, const BoardState* board) {
+        std::vector<Move> pieceMoves;
+        if (!board) return pieceMoves;
+
+        // initialize generator state for this board
+        this->board = board;
+        isWhiteToMove = board->isWhiteToMove();
+        friendlyColour = isWhiteToMove ? COLOR_WHITE : COLOR_BLACK;
+        opponentColour = isWhiteToMove ? COLOR_BLACK : COLOR_WHITE;
+        friendlyColourIndex = isWhiteToMove ? 0 : 1;
+        opponentColourIndex = 1 - friendlyColourIndex;
+
+        const int pieceType = board->getPieceTypeAt(square);
+        if (pieceType < 0) return pieceMoves;
+
+        const int pieceColor = board->getColorAt(square);
+        // only generate moves for side to move
+        if (pieceColor != (board->isWhiteToMove() ? COLOR_WHITE : COLOR_BLACK)) return pieceMoves;
+
+        const PieceList& friendlyKingList = board->getPieceList(friendlyColour, PIECE_KING);
+        if (friendlyKingList.count() == 0) return pieceMoves;
+        friendlyKingSquare = friendlyKingList[0];
+
+        // calculate attack/check/pin data
+        calculateOpponentAttackData();
+
+        const uint64_t friendlyOccupancy = board->getOccupancy(friendlyColour);
+        const uint64_t opponentOccupancy = board->getOccupancy(opponentColour);
+        const uint64_t allOccupancy = board->getMainBoard();
+
+        const bool isPinned = isPinnedFunc(square);
+
+        switch (pieceType) {
+        case PIECE_KING: {
+            const int kingSquare = square;
+            const auto kingMoveList = PrecomputedMoveData::getKingMovesVector(kingSquare);
+            for (uint8_t toSquare : kingMoveList) {
+                uint64_t toMask = (1ULL << toSquare);
+                if ((toSquare == kingSquare + 2) || (toSquare == kingSquare - 2)) {
+                    continue;
+                }
+                if (friendlyOccupancy & toMask) continue;
+                const bool isCapture = (opponentOccupancy & toMask) != 0;
+                if (!isCapture && !true) continue; // genQuiets true for UI
+                if (!squareIsAttacked(toSquare)) {
+                    pieceMoves.emplace_back(kingSquare, toSquare);
+                }
+            }
+
+            if (!inCheck) {
+                // castling
+                if (hasKingsideCastleRight()) {
+                    const int f_square = kingSquare + 1;
+                    const int g_square = kingSquare + 2;
+                    const uint64_t f_mask = (1ULL << f_square);
+                    const uint64_t g_mask = (1ULL << g_square);
+                    if (!(allOccupancy & f_mask) && !(allOccupancy & g_mask)) {
+                        if (!squareIsAttacked(f_square) && !squareIsAttacked(g_square)) {
+                            pieceMoves.emplace_back(kingSquare, g_square, Move::Flag::Castling);
+                        }
+                    }
+                }
+                if (hasQueensideCastleRight()) {
+                    const int b_square = kingSquare - 3;
+                    const int c_square = kingSquare - 2;
+                    const int d_square = kingSquare - 1;
+                    const uint64_t b_mask = (1ULL << b_square);
+                    const uint64_t c_mask = (1ULL << c_square);
+                    const uint64_t d_mask = (1ULL << d_square);
+                    if (!(allOccupancy & b_mask) && !(allOccupancy & c_mask) && !(allOccupancy & d_mask)) {
+                        if (!squareIsAttacked(d_square) && !squareIsAttacked(c_square)) {
+                            pieceMoves.emplace_back(kingSquare, c_square, Move::Flag::Castling);
+                        }
+                    }
+                }
+            }
+            break;
+        }
+        case PIECE_ROOK:
+        case PIECE_BISHOP:
+        case PIECE_QUEEN: {
+            int startDir = 0, endDir = 8;
+            if (pieceType == PIECE_ROOK) { startDir = 0; endDir = 4; }
+            else if (pieceType == PIECE_BISHOP) { startDir = 4; endDir = 8; }
+            else { startDir = 0; endDir = 8; }
+
+            for (int dir = startDir; dir < endDir; ++dir) {
+                int offset = PrecomputedMoveData::dirOffsets[dir];
+                if (isPinned && !isMovingAlongRay(offset, friendlyKingSquare, square)) continue;
+
+                int s = square + offset;
+                while (s >= 0 && s < 64) {
+                    if (!PrecomputedMoveData::isDirectionalMove(square, s, dir)) break;
+                    uint64_t mask = (1ULL << s);
+                    if (friendlyOccupancy & mask) break;
+                    const bool isCapture = (opponentOccupancy & mask) != 0;
+                    const bool movePreventsCheck = squareIsInCheckRay(s);
+                    if (!inCheck || movePreventsCheck) {
+                        if (isCapture) pieceMoves.emplace_back(square, s); else pieceMoves.emplace_back(square, s);
+                    }
+                    if (isCapture || movePreventsCheck) break;
+                    s += offset;
+                }
+            }
+            break;
+        }
+        case PIECE_KNIGHT: {
+            if (isPinned) break; // knight pinned can't move
+            const auto knightMoveList = PrecomputedMoveData::getKnightMoves(square);
+            for (uint8_t toSquare : knightMoveList) {
+                uint64_t toMask = (1ULL << toSquare);
+                if (friendlyOccupancy & toMask) continue;
+                const bool isCapture = (opponentOccupancy & toMask) != 0;
+                if (inCheck && !squareIsInCheckRay(toSquare)) continue;
+                pieceMoves.emplace_back(square, toSquare);
+            }
+            break;
+        }
+        case PIECE_PAWN: {
+            const int pawnSquare = square;
+            const int pushDir = (friendlyColour == COLOR_WHITE) ? 8 : -8;
+            const int pawnRank = BoardRepresentation::RankIndex(pawnSquare);
+            const int captureRank = (friendlyColour == COLOR_WHITE) ? 6 : 1;
+            const int startRank = (friendlyColour == COLOR_WHITE) ? 1 : 6;
+            const bool oneStepFromPromotion = (pawnRank == captureRank);
+
+            // forward moves
+            const int pushSquare = pawnSquare + pushDir;
+            if (pushSquare >= 0 && pushSquare < 64) {
+                uint64_t pushMask = (1ULL << pushSquare);
+                if (!(allOccupancy & pushMask)) {
+                    if (!isPinned || isMovingAlongRay(pushDir, pawnSquare, friendlyKingSquare)) {
+                        if (!inCheck || squareIsInCheckRay(pushSquare)) {
+                            if (oneStepFromPromotion) {
+                                pieceMoves.emplace_back(pawnSquare, pushSquare, Move::Flag::PromoteToQueen);
+                                pieceMoves.emplace_back(pawnSquare, pushSquare, Move::Flag::PromoteToRook);
+                                pieceMoves.emplace_back(pawnSquare, pushSquare, Move::Flag::PromoteToKnight);
+                                pieceMoves.emplace_back(pawnSquare, pushSquare, Move::Flag::PromoteToBishop);
+                            } else {
+                                pieceMoves.emplace_back(pawnSquare, pushSquare);
+                            }
+                        }
+
+                        if (pawnRank == startRank) {
+                            const int doubleSquare = pawnSquare + 2 * pushDir;
+                            if (doubleSquare >= 0 && doubleSquare < 64) {
+                                uint64_t doubleMask = (1ULL << doubleSquare);
+                                if (!(allOccupancy & doubleMask)) {
+                                    if (!inCheck || squareIsInCheckRay(doubleSquare)) {
+                                        pieceMoves.emplace_back(pawnSquare, doubleSquare, Move::Flag::PawnTwoForward);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // captures
+            const auto& pawnAttacks = (friendlyColour == COLOR_WHITE) ?
+                PrecomputedMoveData::getPawnAttacksWhite(pawnSquare) :
+                PrecomputedMoveData::getPawnAttacksBlack(pawnSquare);
+
+            for (int captureSquare : pawnAttacks) {
+                const int captureOffset = captureSquare - pawnSquare;
+                if (isPinned && !isMovingAlongRay(captureOffset, friendlyKingSquare, pawnSquare)) continue;
+                uint64_t captureMask = (1ULL << captureSquare);
+                if (opponentOccupancy & captureMask) {
+                    if (inCheck && !squareIsInCheckRay(captureSquare)) continue;
+                    if (oneStepFromPromotion) {
+                        pieceMoves.emplace_back(pawnSquare, captureSquare, Move::Flag::PromoteToQueen);
+                        pieceMoves.emplace_back(pawnSquare, captureSquare, Move::Flag::PromoteToRook);
+                        pieceMoves.emplace_back(pawnSquare, captureSquare, Move::Flag::PromoteToKnight);
+                        pieceMoves.emplace_back(pawnSquare, captureSquare, Move::Flag::PromoteToBishop);
+                    } else {
+                        pieceMoves.emplace_back(pawnSquare, captureSquare);
+                    }
+                }
+
+                // en-passant
+                if (board->getEnPas() == captureSquare) {
+                    const int epCapturedPawnSquare = captureSquare + ((friendlyColour == COLOR_WHITE) ? -8 : 8);
+                    if (!inCheckAfterEnPassant(pawnSquare, captureSquare, epCapturedPawnSquare)) {
+                        pieceMoves.emplace_back(pawnSquare, captureSquare, Move::Flag::EnPassantCapture);
+                    }
+                }
+            }
+            break;
+        }
+        default:
+            break;
+        }
+
+        return pieceMoves;
+    }
+
+
     void MoveGenerator::calculateOpponentAttackData() {
         opponentKnightAttacks = 0ULL;
         opponentPawnAttackMap = 0ULL;
@@ -606,6 +803,10 @@ namespace Chess {
 
     void MoveGenerator::addPawnCaptureMove(const BoardState& board, int fromSquare, int toSquare, int capturedPieceType) {
         addMove(Move(fromSquare, toSquare, Move::Flag::None));
+    }
+
+    bool MoveGenerator::getInCheck() const {
+        return inCheck;
     }
 
 }  // namespace Chess
